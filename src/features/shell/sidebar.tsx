@@ -1,3 +1,4 @@
+import { ShoppingBag } from "lucide-react";
 import { Gamepad2Icon, RadioIcon, ScrollTextIcon, SettingsIcon, SquareIcon, TrophyIcon } from "@/components/icons";
 import type { ReactNode } from "react";
 
@@ -17,6 +18,7 @@ import { useUiStore, type Page } from "./ui-store";
 const PRIMARY_PAGES: { page: Page; icon: ReactNode; label: MessageKey }[] = [
   { page: "games", icon: <Gamepad2Icon />, label: "nav.games" },
   { page: "quests", icon: <TrophyIcon />, label: "nav.quests" },
+  { page: "shop", icon: <ShoppingBag />, label: "nav.shop" },
   { page: "presence", icon: <RadioIcon />, label: "nav.presence" },
   { page: "logs", icon: <ScrollTextIcon />, label: "nav.logs" },
 ];

@@ -20,6 +20,11 @@ export function playTask(quest: Quest): QuestTask | undefined {
   return quest.tasks.find((task) => task.kind === "playOnDesktop");
 }
 
+/** A quest asked in a video (an ad to watch): Discord shows it in its own client, no fake game can do it. */
+export function isVideoQuest(quest: Quest): boolean {
+  return quest.tasks.some((task) => task.kind === "watchVideo" || task.kind === "watchVideoOnMobile");
+}
+
 /** Minutes to play, rounded up: Discord counts whole minutes of playtime. */
 export function taskMinutes(task: QuestTask): number {
   return Math.max(1, Math.ceil(task.targetSeconds / 60));
@@ -64,6 +69,25 @@ function lookupFor(games: Game[]): GameLookup {
  */
 export function warmUpQuestLookup(games: Game[]): void {
   lookupFor(games);
+}
+
+/**
+ * Every catalog game that completes a quest. When Discord lists the games a quest
+ * accepts, only those count: the quest's name (« Resident Evil Sale ») may match
+ * one title of the franchise and still not be what to play. Without such a list,
+ * the single best guess of [resolveQuestGame] is used.
+ */
+export function resolveQuestGames(quest: Quest, games: Game[]): QuestGame[] {
+  if (quest.eligibleApplicationIds.length === 0) {
+    const single = resolveQuestGame(quest, games);
+    return single ? [single] : [];
+  }
+
+  const { byId } = lookupFor(games);
+  return quest.eligibleApplicationIds.flatMap((id) => {
+    const game = byId.get(id);
+    return game ? [{ game, match: "id" as const }] : [];
+  });
 }
 
 /** Finds the catalog game a quest asks to play. */
@@ -120,4 +144,55 @@ export function sortQuests(quests: Quest[], now: number): Quest[] {
     }
     return (settledAt(b) ?? 0) - (settledAt(a) ?? 0);
   });
+}
+
+/** The objective of a quest the app can do: playing, else watching, else the first one. */
+export function objectiveTask(quest: Quest): QuestTask | undefined {
+  return (
+    playTask(quest) ??
+    quest.tasks.find((task) => task.kind === "watchVideo" || task.kind === "watchVideoOnMobile") ??
+    quest.tasks[0]
+  );
+}
+
+/** What is still to do on the objective, in seconds (all of it while Discord reports no progress). */
+export function remainingObjectiveSeconds(quest: Quest): number {
+  const task = objectiveTask(quest);
+  if (!task) return Number.MAX_SAFE_INTEGER;
+  return Math.max(0, task.targetSeconds - (quest.progressSeconds ?? 0));
+}
+
+export type QuestSort = "expiry" | "reward" | "remaining";
+export type QuestKind = "all" | "play" | "video";
+
+/** Open quests in the order asked: soonest deadline, biggest Orbs reward, or least time left. */
+export function sortOpenQuests(quests: Quest[], sort: QuestSort): Quest[] {
+  const far = Number.MAX_SAFE_INTEGER;
+  const byExpiry = (a: Quest, b: Quest) => (a.expiresAt ?? far) - (b.expiresAt ?? far);
+
+  return quests.toSorted((a, b) => {
+    if (sort === "reward") return (b.rewardOrbs ?? -1) - (a.rewardOrbs ?? -1) || byExpiry(a, b);
+    if (sort === "remaining") return remainingObjectiveSeconds(a) - remainingObjectiveSeconds(b) || byExpiry(a, b);
+    return byExpiry(a, b);
+  });
+}
+
+export function filterByKind(quests: Quest[], kind: QuestKind): Quest[] {
+  if (kind === "all") return quests;
+  return quests.filter((quest) => isVideoQuest(quest) === (kind === "video"));
+}
+
+/** Orbs the given quests would grant if they were all done. */
+export function orbsAtStake(quests: readonly Quest[]): number {
+  return quests.reduce((total, quest) => total + (quest.rewardOrbs ?? 0), 0);
+}
+
+const DAY_MS = 86_400_000;
+
+/** Open quests whose deadline is less than a day away. */
+export function expiringSoon(quests: readonly Quest[], now: number): Quest[] {
+  return quests.filter(
+    (quest) =>
+      isOpen(questState(quest, now)) && quest.expiresAt !== null && quest.expiresAt > now && quest.expiresAt - now <= DAY_MS,
+  );
 }

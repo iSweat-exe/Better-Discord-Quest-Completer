@@ -2,9 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { ipc } from "@/lib/ipc";
 import { queryKeys } from "@/lib/query";
-import type { QuestsResponse } from "@/types/domain";
+import type { QuestsResponse, VideoProgress } from "@/types/domain";
+
+import { useVideoStore } from "./video-store";
 
 const QUESTS_FRESH_MS = 5 * 60_000;
+const SHOP_FRESH_MS = 15 * 60_000;
 const PROFILE_FRESH_MS = 30 * 60_000;
 
 const questsOptions = { queryKey: queryKeys.quests, queryFn: ipc.refreshQuests, staleTime: QUESTS_FRESH_MS } as const;
@@ -52,6 +55,17 @@ export function useOrbsBalance() {
   return useQuery({ queryKey: queryKeys.orbsBalance, queryFn: ipc.getOrbsBalance, staleTime: QUESTS_FRESH_MS });
 }
 
+/** What the Orbs shop sells. Needs a saved token; the shop changes rarely, so it stays fresh a while. */
+export function useOrbsShop() {
+  const { data: connected } = useQuestsConnection();
+  return useQuery({
+    queryKey: queryKeys.orbsShop,
+    queryFn: ipc.getOrbsShop,
+    enabled: connected === true,
+    staleTime: SHOP_FRESH_MS,
+  });
+}
+
 /** Sends the token once: it is checked, stored by the backend and forgotten here. */
 export function useConnectQuests() {
   const queryClient = useQueryClient();
@@ -68,6 +82,57 @@ export function useConnectQuests() {
   });
 }
 
+export type QuestAction = "enroll" | "claim" | "watchVideo";
+
+/** What an action answers: the reloaded list, or nothing for a viewing that goes on in the background. */
+const QUEST_ACTIONS: Record<QuestAction, (questId: string) => Promise<QuestsResponse | undefined>> = {
+  enroll: ipc.enrollQuest,
+  claim: ipc.claimQuestReward,
+  watchVideo: async (questId) => {
+    await ipc.watchQuestVideo(questId);
+    useVideoStore.getState().begin(questId);
+    return undefined;
+  },
+};
+
+/** Accepts, claims or starts watching one quest: the answer is the reloaded list (a viewing ends later, by event). */
+export function useQuestAction(action: QuestAction) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: QUEST_ACTIONS[action],
+    onSuccess: (response) => {
+      if (response) queryClient.setQueryData<QuestsResponse>(queryKeys.quests, response);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.orbsBalance });
+    },
+    // A write that failed halfway may still have counted.
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.questRisk });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.questActivity });
+    },
+  });
+}
+
+/** How suspicious the recent writes on the account look. */
+export function useQuestRisk() {
+  return useQuery({ queryKey: queryKeys.questRisk, queryFn: ipc.getQuestRisk, staleTime: Infinity });
+}
+
+/** The writes made on the account, newest first: what makes the risk level rise. */
+export function useQuestActivity() {
+  return useQuery({ queryKey: queryKeys.questActivity, queryFn: ipc.getQuestActivity, staleTime: Infinity });
+}
+
+/** The seconds of a video quest reported so far while the app is watching it, `null` otherwise. */
+export function useVideoProgress(questId: string): VideoProgress | null {
+  return useVideoStore((state) => state.progress[questId] ?? null);
+}
+
+/** The videos that were being watched when the app was last closed. */
+export function useInterruptedVideos() {
+  return useQuery({ queryKey: queryKeys.interruptedVideos, queryFn: ipc.getInterruptedVideos, staleTime: Infinity });
+}
+
 export function useDisconnectQuests() {
   const queryClient = useQueryClient();
 
@@ -76,6 +141,7 @@ export function useDisconnectQuests() {
     onSuccess: () => {
       queryClient.removeQueries({ queryKey: queryKeys.quests });
       queryClient.removeQueries({ queryKey: queryKeys.orbsBalance });
+      queryClient.removeQueries({ queryKey: queryKeys.orbsShop });
       queryClient.removeQueries({ queryKey: queryKeys.profile });
       queryClient.setQueryData(queryKeys.questsConnection, false);
     },

@@ -19,8 +19,12 @@ export const queryKeys = {
   quests: ["quests"],
   questsConnection: ["quests-connection"],
   orbsBalance: ["orbs-balance"],
+  orbsShop: ["orbs-shop"],
   profile: ["profile"],
   appStats: ["app-stats"],
+  questRisk: ["quest-risk"],
+  questActivity: ["quest-activity"],
+  interruptedVideos: ["interrupted-videos"],
 } as const;
 
 export function createQueryClient(): QueryClient {

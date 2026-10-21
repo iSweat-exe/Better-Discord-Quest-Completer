@@ -130,6 +130,8 @@ mod tests {
             game_title: None,
             publisher: None,
             application_id: None,
+            eligible_application_ids: Vec::new(),
+            any_task: false,
             reward: None,
             reward_orbs: None,
             starts_at: None,

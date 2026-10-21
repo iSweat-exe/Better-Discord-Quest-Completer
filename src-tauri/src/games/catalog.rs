@@ -12,7 +12,6 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
 
 use serde::de::IgnoredAny;
 use serde::{Deserialize, Serialize};
@@ -75,12 +74,7 @@ pub struct CatalogService {
 
 impl CatalogService {
     pub fn new(cache_file: PathBuf, log: Arc<AppLog>) -> AppResult<Self> {
-        let client = reqwest::Client::builder()
-            .user_agent(concat!("DiscordQuestCompleter/", env!("CARGO_PKG_VERSION")))
-            .connect_timeout(Duration::from_secs(8))
-            .timeout(Duration::from_secs(45))
-            .build()
-            .map_err(|error| AppError::Network(error.to_string()))?;
+        let client = crate::http::public_client(crate::http::DOWNLOAD_TIMEOUT)?;
 
         Ok(Self {
             client,

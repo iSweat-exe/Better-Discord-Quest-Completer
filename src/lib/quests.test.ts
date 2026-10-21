@@ -3,13 +3,18 @@ import { describe, expect, it } from "vitest";
 import type { Game, Quest } from "@/types/domain";
 
 import {
+  expiringSoon,
+  filterByKind,
   isOpen,
+  orbsAtStake,
   playTask,
   questState,
   remainingSeconds,
   resolveQuestGame,
+  resolveQuestGames,
   sameTitle,
   settledAt,
+  sortOpenQuests,
   sortQuests,
   taskMinutes,
 } from "./quests";
@@ -23,6 +28,8 @@ const quest = (overrides: Partial<Quest> = {}): Quest => ({
   gameTitle: null,
   publisher: null,
   applicationId: null,
+  eligibleApplicationIds: [],
+  anyTask: false,
   reward: null,
   rewardOrbs: null,
   startsAt: null,
@@ -199,5 +206,63 @@ describe("sameTitle", () => {
   it("tells different titles apart", () => {
     expect(sameTitle("FC 26", "FC 27")).toBe(false);
     expect(sameTitle("Overwatch", "Overwatch 2")).toBe(false);
+  });
+});
+
+describe("resolveQuestGames", () => {
+  const games = [game("1", "Resident Evil"), game("2", "Resident Evil 4"), game("3", "Fortnite")];
+
+  it("offers every accepted game that is in the catalog, and never guesses by title", () => {
+    const resolved = resolveQuestGames(
+      quest({ name: "Resident Evil Sale", gameTitle: "Resident Evil", eligibleApplicationIds: ["2", "404", "3"] }),
+      games,
+    );
+    expect(resolved.map((entry) => entry.game.id)).toEqual(["2", "3"]);
+    expect(resolved.every((entry) => entry.match === "id")).toBe(true);
+  });
+
+  it("offers nothing when none of the accepted games is known", () => {
+    expect(resolveQuestGames(quest({ gameTitle: "Resident Evil", eligibleApplicationIds: ["404"] }), games)).toEqual([]);
+  });
+
+  it("falls back to the single best guess without a game list", () => {
+    expect(resolveQuestGames(quest({ gameTitle: "Fortnite" }), games)).toEqual([{ game: games[2], match: "name" }]);
+    expect(resolveQuestGames(quest({ gameTitle: "Nope" }), games)).toEqual([]);
+  });
+});
+
+describe("sorting, filtering and totals of open quests", () => {
+  const video = (overrides: Partial<Quest> = {}) =>
+    quest({ tasks: [{ kind: "watchVideo", targetSeconds: 120 }], ...overrides });
+
+  it("sorts by deadline, reward or time left", () => {
+    const a = quest({ id: "a", expiresAt: NOW + 3 * DAY, rewardOrbs: 200, tasks: [{ kind: "playOnDesktop", targetSeconds: 900 }] });
+    const b = quest({ id: "b", expiresAt: NOW + DAY, rewardOrbs: null, tasks: [{ kind: "playOnDesktop", targetSeconds: 900 }], progressSeconds: 100 });
+    const c = quest({ id: "c", expiresAt: NOW + 2 * DAY, rewardOrbs: 700, tasks: [{ kind: "playOnDesktop", targetSeconds: 300 }] });
+
+    const ids = (sort: Parameters<typeof sortOpenQuests>[1]) => sortOpenQuests([a, b, c], sort).map((q) => q.id);
+    expect(ids("expiry")).toEqual(["b", "c", "a"]);
+    expect(ids("reward")).toEqual(["c", "a", "b"]);
+    expect(ids("remaining")).toEqual(["c", "b", "a"]);
+  });
+
+  it("keeps only play or video quests when asked", () => {
+    const play = quest({ id: "p" });
+    const clip = video({ id: "v" });
+    expect(filterByKind([play, clip], "all")).toHaveLength(2);
+    expect(filterByKind([play, clip], "video").map((q) => q.id)).toEqual(["v"]);
+    expect(filterByKind([play, clip], "play").map((q) => q.id)).toEqual(["p"]);
+  });
+
+  it("adds up the Orbs at stake, ignoring other rewards", () => {
+    expect(orbsAtStake([quest({ rewardOrbs: 700 }), quest({ rewardOrbs: 200 }), quest({ rewardOrbs: null })])).toBe(900);
+  });
+
+  it("flags open quests that expire within a day only", () => {
+    const soon = quest({ id: "soon", expiresAt: NOW + DAY / 2 });
+    const later = quest({ id: "later", expiresAt: NOW + 3 * DAY });
+    const gone = quest({ id: "gone", expiresAt: NOW - 1 });
+    const done = quest({ id: "done", expiresAt: NOW + DAY / 2, status: "completed" });
+    expect(expiringSoon([soon, later, gone, done], NOW).map((q) => q.id)).toEqual(["soon"]);
   });
 });

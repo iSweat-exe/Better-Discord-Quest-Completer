@@ -17,6 +17,7 @@ const api = vi.hoisted(() => ({
   addToLibrary: vi.fn(),
   startSession: vi.fn(),
   disconnectQuests: vi.fn(),
+  enrollQuest: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof IpcModule>()),
@@ -52,6 +53,8 @@ const quest = (overrides: Partial<Quest>): Quest => ({
   gameTitle: null,
   publisher: null,
   applicationId: null,
+  eligibleApplicationIds: [],
+  anyTask: false,
   reward: null,
   rewardOrbs: null,
   startsAt: null,
@@ -159,9 +162,44 @@ describe("QuestsPage", () => {
     respond([quest({ id: "v", name: "Watch the trailer", tasks: [{ kind: "watchVideo", targetSeconds: 30 }] })]);
     renderPage();
 
-    const card = (await screen.findByText("Watch the trailer")).closest("li")!;
-    expect(within(card).getByText(/completed in Discord/)).toBeInTheDocument();
-    expect(within(card).queryByRole("button")).not.toBeInTheDocument();
+    const card = (await screen.findByText("Watch the trailer", { selector: "h3" })).closest("li")!;
+    expect(within(card).getByText(/Accept it, then complete the video/)).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Accept" })).toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: /Launch|Search/ })).not.toBeInTheDocument();
+  });
+
+  it("asks for a confirmation, with the risk, before writing on the account", async () => {
+    const q = quest({ id: "7", name: "Watch the trailer", tasks: [{ kind: "watchVideo", targetSeconds: 30 }] });
+    respond([q]);
+    api.enrollQuest.mockResolvedValue({ quests: [{ ...q, status: "enrolled" }], fetchedAt: NOW, rawJson: "{}" });
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Accept" }));
+    expect(api.enrollQuest).not.toHaveBeenCalled();
+    expect(await screen.findByText(/can get your account warned, limited or banned/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Confirm: Accept" }));
+    await waitFor(() => {
+      expect(api.enrollQuest.mock.calls[0]?.[0]).toBe("7");
+    });
+  });
+
+  it("points out the open video quests", async () => {
+    respond([
+      quest({ id: "v", name: "Watch the trailer", tasks: [{ kind: "watchVideo", targetSeconds: 30 }] }),
+      quest({ id: "p", name: "Play something" }),
+    ]);
+    renderPage();
+
+    expect(await screen.findByRole("region", { name: "1 video quest to watch" })).toBeInTheDocument();
+  });
+
+  it("shows no video notice without a video quest", async () => {
+    respond([quest({ id: "p", name: "Play something" })]);
+    renderPage();
+
+    await screen.findByText("Play something");
+    expect(screen.queryByRole("region")).not.toBeInTheDocument();
   });
 
   it("warns when the game has no Windows executable", async () => {
@@ -211,7 +249,7 @@ describe("QuestsPage", () => {
     await userEvent.click(await screen.findByRole("radio", { name: "Finished or expired" }));
     expect(screen.getByText("Reward claimed 2 days ago")).toBeInTheDocument();
     expect(screen.getByText(/Completed yesterday/)).toBeInTheDocument();
-    expect(screen.getByText(/reward to claim in Discord/)).toBeInTheDocument();
+    expect(screen.getByText(/reward to claim/)).toBeInTheDocument();
   });
 
   it("separates finished quests from the ones to do", async () => {

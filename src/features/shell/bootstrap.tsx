@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { toast } from "sonner";
 
+import { useVideoStore } from "@/features/quests/video-store";
 import { useLogStore } from "@/features/logs/log-store";
 import { useUpdateStore } from "@/features/update/update-store";
 import { useSessionStore } from "@/features/sessions/session-store";
@@ -47,6 +48,8 @@ export function Bootstrap() {
     void ipc.getLogs().then(logs.replace);
     // The check may have found something before this window was listening.
     void ipc.getPendingUpdate().then(update.setInfo);
+    // A viewing started before a reload goes on in the backend.
+    void ipc.getActiveVideos().then(useVideoStore.getState().replaceAll);
 
     const unsubscribers = [
       subscribe(EVENTS.sessionsChanged, setSessions),
@@ -83,6 +86,17 @@ export function Bootstrap() {
       subscribe(EVENTS.questDone, ({ name }) => {
         const locale = useLocaleStore.getState().locale;
         toast.success(translate(locale, "quest.confirmedToast", { name }));
+      }),
+      // A video is watched in the background, whatever page is open.
+      subscribe(EVENTS.questVideoProgress, useVideoStore.getState().set),
+      subscribe(EVENTS.questVideoEnded, ({ questId, name, ok, message }) => {
+        useVideoStore.getState().end(questId);
+        const locale = useLocaleStore.getState().locale;
+        if (ok) toast.success(translate(locale, "quests.videoDoneNamed", { name }));
+        else toast.error(translate(locale, "quests.videoFailed", { name, reason: message ?? "" }));
+        void queryClient.invalidateQueries({ queryKey: queryKeys.questRisk });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.questActivity });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.orbsBalance });
       }),
       subscribe(EVENTS.closeRequested, (running) => {
         useUiStore.getState().setClosePrompt(running);

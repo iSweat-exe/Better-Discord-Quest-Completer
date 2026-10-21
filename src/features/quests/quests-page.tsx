@@ -13,11 +13,23 @@ import { useLibrary } from "@/features/games/queries";
 import { useSessionStore } from "@/features/sessions/session-store";
 import { cn } from "@/lib/cn";
 import { errorMessage } from "@/lib/errors";
-import { formatRelativeTime } from "@/lib/format";
+import { formatNumber, formatRelativeTime } from "@/lib/format";
 import { useT } from "@/lib/i18n/use-t";
 import { IpcError } from "@/lib/ipc";
 import { queryKeys } from "@/lib/query";
-import { isOpen, questState, resolveQuestGame, sortQuests } from "@/lib/quests";
+import {
+  filterByKind,
+  isOpen,
+  isVideoQuest,
+  orbsAtStake,
+  type QuestGame,
+  type QuestKind,
+  type QuestSort,
+  questState,
+  resolveQuestGames,
+  sortOpenQuests,
+  sortQuests,
+} from "@/lib/quests";
 import { useFlash } from "@/lib/use-flash";
 import { useMinute } from "@/lib/use-now";
 
@@ -25,8 +37,13 @@ import { OrbsBalance } from "./orbs-balance";
 import { QuestCard } from "./quest-card";
 import { useDisconnectQuests, useQuests, useQuestsConnection } from "./queries";
 import { TokenGate } from "./token-gate";
+import { ExpiryNotice, InterruptedNotice } from "./quest-notices";
+import { RiskIndicator, RiskNotice } from "./risk-indicator";
+import { VideoNotice } from "./video-notice";
 
 type Filter = "todo" | "done";
+
+const NO_GAMES: QuestGame[] = [];
 
 function QuestBoard() {
   const { t, locale } = useT();
@@ -40,6 +57,8 @@ function QuestBoard() {
   const { data: library = [] } = useLibrary();
   const sessions = useSessionStore((state) => state.sessions);
   const [filter, setFilter] = useState<Filter>("todo");
+  const [sort, setSort] = useState<QuestSort>("expiry");
+  const [kind, setKind] = useState<QuestKind>("all");
   const [rawCopied, flashRawCopied] = useFlash();
 
   // A token Discord refuses is removed by the backend: go back to the gate.
@@ -56,11 +75,24 @@ function QuestBoard() {
 
   const questList = quests.data?.quests;
   const sorted = useMemo(() => sortQuests(questList ?? [], now), [questList, now]);
-  const visible = sorted.filter((quest) => isOpen(questState(quest, now)) === (filter === "todo"));
+  const openQuests = useMemo(() => sorted.filter((quest) => isOpen(questState(quest, now))), [sorted, now]);
+  const visible = useMemo(
+    () =>
+      filter === "todo"
+        ? sortOpenQuests(filterByKind(openQuests, kind), sort)
+        : sorted.filter((quest) => !isOpen(questState(quest, now))),
+    [filter, openQuests, kind, sort, sorted, now],
+  );
+  const stake = useMemo(() => orbsAtStake(visible), [visible]);
+
+  const videoQuests = useMemo(
+    () => sorted.filter((quest) => isVideoQuest(quest) && isOpen(questState(quest, now))),
+    [sorted, now],
+  );
 
   // Resolved from the quests themselves, not from the clock: a tick must not search the catalog again.
   const resolvedGames = useMemo(
-    () => new Map((questList ?? []).map((quest) => [quest.id, games ? resolveQuestGame(quest, games) : null])),
+    () => new Map((questList ?? []).map((quest) => [quest.id, games ? resolveQuestGames(quest, games) : []])),
     [questList, games],
   );
 
@@ -82,6 +114,7 @@ function QuestBoard() {
           </div>
 
           <div className="flex items-center gap-2">
+            <RiskIndicator />
             <OrbsBalance />
             <Button
               size="sm"
@@ -150,6 +183,45 @@ function QuestBoard() {
               </p>
             </div>
 
+            {filter === "todo" ? (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <Segmented<QuestSort>
+                    label={t("quests.sort.label")}
+                    value={sort}
+                    onChange={setSort}
+                    options={[
+                      { value: "expiry", label: t("quests.sort.expiry") },
+                      { value: "reward", label: t("quests.sort.reward") },
+                      { value: "remaining", label: t("quests.sort.remaining") },
+                    ]}
+                  />
+                  <Segmented<QuestKind>
+                    label={t("quests.kind.label")}
+                    value={kind}
+                    onChange={setKind}
+                    options={[
+                      { value: "all", label: t("quests.kind.all") },
+                      { value: "play", label: t("quests.kind.play") },
+                      { value: "video", label: t("quests.kind.video") },
+                    ]}
+                  />
+                </div>
+                {stake > 0 ? (
+                  <p className="text-[13px] font-medium tabular-nums text-muted">
+                    {t("quests.stake", { count: formatNumber(stake, locale) })}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            {filter === "todo" ? <ExpiryNotice quests={openQuests} now={now} /> : null}
+            {filter === "todo" ? <InterruptedNotice quests={openQuests} now={now} /> : null}
+
+            <RiskNotice />
+
+            {filter === "todo" ? <VideoNotice quests={videoQuests} now={now} /> : null}
+
             {visible.length === 0 ? (
               <div className="rounded-card bg-surface shadow-card">
                 <EmptyState icon={<TrophyIcon />} title={t(filter === "todo" ? "quests.empty.todo" : "quests.empty.done")} />
@@ -157,15 +229,14 @@ function QuestBoard() {
             ) : (
               <ul className="flex flex-col gap-3">
                 {visible.map((quest) => {
-                  const resolved = resolvedGames.get(quest.id) ?? null;
                   return (
                     <QuestCard
                       key={quest.id}
                       quest={quest}
                       now={now}
-                      resolved={resolved}
-                      inLibrary={resolved !== null && libraryIds.has(resolved.game.id)}
-                      running={resolved !== null && runningIds.has(resolved.game.id)}
+                      resolved={resolvedGames.get(quest.id) ?? NO_GAMES}
+                      libraryIds={libraryIds}
+                      runningIds={runningIds}
                     />
                   );
                 })}

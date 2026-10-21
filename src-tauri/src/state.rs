@@ -37,6 +37,10 @@ pub const EVENT_QUESTS_UPDATED: &str = "quests-updated";
 pub const EVENT_QUESTS_DISCONNECTED: &str = "quests-disconnected";
 /// Discord itself marked a quest as completed (payload: [`crate::quest_watch::QuestDone`]).
 pub const EVENT_QUEST_DONE: &str = "quest-done";
+/// A second more of a video quest was reported (payload: [`crate::commands::VideoProgress`]).
+pub const EVENT_QUEST_VIDEO_PROGRESS: &str = "quest-video-progress";
+/// The app stopped watching a video, done or not (payload: [`crate::commands::VideoEnded`]).
+pub const EVENT_QUEST_VIDEO_ENDED: &str = "quest-video-ended";
 
 /// Argument passed by the "launch at startup" entry: start in the tray.
 pub const MINIMIZED_ARGUMENT: &str = "--minimized";

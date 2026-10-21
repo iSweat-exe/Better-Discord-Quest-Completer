@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type {
+  ActivityEntry,
   AppInfo,
   AppStats,
   Catalog,
@@ -14,12 +15,15 @@ import type {
   PresenceRequest,
   Profile,
   PresenceStatus,
+  QuestRisk,
   QuestsResponse,
+  ShopResponse,
   SessionInfo,
   Settings,
   SettingsPatch,
   StorageInfo,
   UpdateInfo,
+  VideoProgress,
 } from "@/types/domain";
 
 /** An error reported by the Rust backend (`{ kind, message }`). */
@@ -79,9 +83,20 @@ export const ipc = {
   /** The quests as last seen: available before any request to Discord. */
   getCachedQuests: () => call<QuestsResponse | null>("get_cached_quests"),
   refreshQuests: () => call<QuestsResponse>("refresh_quests"),
+  /** The three writes on a quest; each answers with the reloaded quests. */
+  enrollQuest: (questId: string) => call<QuestsResponse>("enroll_quest", { questId }),
+  claimQuestReward: (questId: string) => call<QuestsResponse>("claim_quest_reward", { questId }),
+  /** Starts the viewing in the background: it ends with a `quest-video-ended` event. */
+  watchQuestVideo: (questId: string) => call<void>("watch_quest_video", { questId }),
+  getActiveVideos: () => call<VideoProgress[]>("get_active_videos"),
+  getInterruptedVideos: () => call<string[]>("get_interrupted_videos"),
+  dismissInterruptedVideos: () => call<void>("dismiss_interrupted_videos"),
+  getQuestActivity: () => call<ActivityEntry[]>("get_quest_activity"),
   getAppStats: () => call<AppStats>("get_app_stats"),
+  getQuestRisk: () => call<QuestRisk>("get_quest_risk"),
   getProfile: () => call<Profile>("get_profile"),
   getOrbsBalance: () => call<number>("get_orbs_balance"),
+  getOrbsShop: () => call<ShopResponse>("get_orbs_shop"),
   disconnectQuests: () => call<void>("disconnect_quests"),
 
   /** `null` means the app is up to date. */

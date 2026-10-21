@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   refreshQuests: vi.fn(),
   getOrbsBalance: vi.fn(),
   getAppStats: vi.fn(),
+  getQuestActivity: vi.fn(),
   getLibrary: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (importOriginal) => ({
@@ -34,6 +35,8 @@ const quest = (overrides: Partial<Quest>): Quest => ({
   gameTitle: null,
   publisher: null,
   applicationId: null,
+  eligibleApplicationIds: [],
+  anyTask: false,
   reward: null,
   rewardOrbs: null,
   startsAt: null,
@@ -54,13 +57,16 @@ const QUESTS: Quest[] = [
   quest({ id: "5", expiresAt: NOW - DAY }),
 ];
 
+const EMPTY_STATS: AppStats = { questsCompleted: 0, orbsEarned: 0, timeSavedSeconds: 0, weekly: [], recent: [] };
+
 function setup(options: { connected?: boolean; stats?: AppStats; library?: LibraryEntry[] } = {}) {
   const response: QuestsResponse = { quests: QUESTS, fetchedAt: NOW, rawJson: "{}" };
   api.getQuestsConnection.mockResolvedValue(options.connected ?? true);
   api.getProfile.mockResolvedValue(PROFILE);
   api.refreshQuests.mockResolvedValue(response);
   api.getOrbsBalance.mockResolvedValue(1250);
-  api.getAppStats.mockResolvedValue(options.stats ?? { questsCompleted: 0, orbsEarned: 0, recent: [] });
+  api.getAppStats.mockResolvedValue(options.stats ?? EMPTY_STATS);
+  api.getQuestActivity.mockResolvedValue([]);
   api.getLibrary.mockResolvedValue(options.library ?? []);
 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -73,7 +79,7 @@ function setup(options: { connected?: boolean; stats?: AppStats; library?: Libra
 
 /** The value shown in the tile that carries `label`. */
 const valueOf = (label: string) => {
-  const tile = screen.getByText(label).closest("div");
+  const tile = screen.getByText(label).closest("div")?.parentElement ?? null;
   if (!tile) throw new Error(`no tile for ${label}`);
   return within(tile).getByText(/^[\d–][\d\s,.hmin–]*$/).textContent;
 };
@@ -116,7 +122,9 @@ describe("ProfilePage", () => {
       stats: {
         questsCompleted: 2,
         orbsEarned: 900,
-        recent: [{ questId: "1", name: "Play Overwatch", orbs: 700, completedAt: NOW - DAY }],
+        timeSavedSeconds: 1800,
+        weekly: [],
+        recent: [{ questId: "1", name: "Play Overwatch", orbs: 700, completedAt: NOW - DAY, seconds: 900 }],
       },
     });
 

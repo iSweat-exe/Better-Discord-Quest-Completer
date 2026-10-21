@@ -66,6 +66,12 @@ pub struct Quest {
     pub publisher: Option<String>,
     /// Discord application id of the game: matches the catalog's game ids.
     pub application_id: Option<String>,
+    /// Every game that counts for the "play" objective. A quest such as a
+    /// franchise sale accepts several: the one named by `application_id` is then
+    /// only one of them, and a title match would be a guess.
+    pub eligible_application_ids: Vec<String>,
+    /// Any one of the tasks is enough (`join_operator: or`), e.g. PC *or* console.
+    pub any_task: bool,
     pub reward: Option<String>,
     /// Orbs the reward grants, when it is Orbs.
     pub reward_orbs: Option<u64>,
@@ -81,6 +87,22 @@ pub struct Quest {
     pub claimed_at: Option<i64>,
 }
 
+impl Quest {
+    /// Whether the quest asks to watch a video.
+    pub fn is_video(&self) -> bool {
+        self.tasks.iter().any(|task| matches!(task.kind, TaskKind::WatchVideo | TaskKind::WatchVideoOnMobile))
+    }
+
+    /// What the quest asks for, in seconds: its play or video objective, else its first one.
+    pub fn objective_seconds(&self) -> Option<u64> {
+        self.tasks
+            .iter()
+            .find(|task| matches!(task.kind, TaskKind::PlayOnDesktop | TaskKind::WatchVideo | TaskKind::WatchVideoOnMobile))
+            .or_else(|| self.tasks.first())
+            .map(|task| task.target_seconds)
+    }
+}
+
 impl QuestStatus {
     /// Whether the objective is still to be done (as opposed to being done).
     pub fn is_unfinished(self) -> bool {
@@ -89,11 +111,11 @@ impl QuestStatus {
 }
 
 /// Looks `names` up in order: the API uses `snake_case`, client stores `camelCase`.
-fn field<'a>(value: &'a Value, names: &[&str]) -> Option<&'a Value> {
+pub(super) fn field<'a>(value: &'a Value, names: &[&str]) -> Option<&'a Value> {
     names.iter().find_map(|name| value.get(name)).filter(|found| !found.is_null())
 }
 
-fn text(value: &Value, names: &[&str]) -> Option<String> {
+pub(super) fn text(value: &Value, names: &[&str]) -> Option<String> {
     let found = field(value, names)?;
     // Some ids are numbers in older payloads.
     let raw = found.as_str().map(str::to_owned).or_else(|| found.as_u64().map(|number| number.to_string()))?;
@@ -121,6 +143,42 @@ fn tasks(config: &Value) -> Vec<QuestTask> {
         Some(Value::Array(list)) => list.iter().filter_map(|task| parse(None, task)).collect(),
         _ => Vec::new(),
     }
+}
+
+/// Applications named by the "play on desktop" tasks, in order and without duplicates.
+fn eligible_applications(config: &Value) -> Vec<String> {
+    let container = field(config, &["task_config", "taskConfig", "task_config_v2", "taskConfigV2"])
+        .and_then(|task_config| field(task_config, &["tasks"]));
+    let tasks: Vec<&Value> = match container {
+        Some(Value::Object(map)) => map.iter().filter(|(key, _)| key.to_ascii_uppercase().starts_with("PLAY_ON_DESKTOP")).map(|(_, task)| task).collect(),
+        Some(Value::Array(list)) => list
+            .iter()
+            .filter(|task| text(task, &["type"]).is_some_and(|kind| kind.to_ascii_uppercase().starts_with("PLAY_ON_DESKTOP")))
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    let mut ids: Vec<String> = Vec::new();
+    for task in tasks {
+        let Some(applications) = field(task, &["applications"]).and_then(Value::as_array) else { continue };
+        for application in applications {
+            // Either `{ "id": "…" }` or a bare id.
+            let id = text(application, &["id"]).or_else(|| application.as_str().map(str::to_owned));
+            if let Some(id) = id
+                && !ids.contains(&id)
+            {
+                ids.push(id);
+            }
+        }
+    }
+    ids
+}
+
+/// `join_operator: "or"`: one of the tasks completes the quest.
+fn any_task(config: &Value) -> bool {
+    field(config, &["task_config", "taskConfig", "task_config_v2", "taskConfigV2"])
+        .and_then(|task_config| text(task_config, &["join_operator", "joinOperator"]))
+        .is_some_and(|operator| operator.eq_ignore_ascii_case("or"))
 }
 
 fn reward(config: &Value) -> Option<String> {
@@ -184,6 +242,8 @@ fn parse_quest(raw: &Value) -> Option<Quest> {
         game_title,
         publisher: messages.and_then(|m| text(m, &["game_publisher", "gamePublisher"])),
         application_id: application.and_then(|a| text(a, &["id"])),
+        eligible_application_ids: eligible_applications(config),
+        any_task: any_task(config),
         reward: reward(config),
         reward_orbs: reward_orbs(config),
         starts_at: timestamp(config, &["starts_at", "startsAt"]),
@@ -416,6 +476,29 @@ mod tests {
         assert_eq!(parse_orbs_balance(&json!({ "balance": 1250 })), Some(1250));
         assert_eq!(parse_orbs_balance(&json!({ "balance": "many" })), None);
         assert_eq!(parse_orbs_balance(&json!([])), None);
+    }
+
+    #[test]
+    fn reads_every_game_a_quest_accepts() {
+        let answer = json!({ "quests": [{ "id": "1", "config": {
+            "application": { "id": "100", "name": "Resident Evil" },
+            "task_config_v2": { "join_operator": "or", "tasks": {
+                "PLAY_ON_DESKTOP": { "type": "PLAY_ON_DESKTOP", "target": 900, "applications": [{ "id": "1" }, { "id": "2" }, "3", { "id": "1" }] },
+                "PLAY_ON_XBOX": { "type": "PLAY_ON_XBOX", "target": 900, "applications": [{ "id": "9" }] }
+            } }
+        } }] });
+
+        let quest = parse_quests(&answer).remove(0);
+        assert_eq!(quest.eligible_application_ids, ["1", "2", "3"], "desktop games only, without duplicates");
+        assert!(quest.any_task);
+    }
+
+    #[test]
+    fn a_quest_without_a_game_list_has_none_and_needs_every_task() {
+        let quest = parse_quests(&json!({ "quests": [{ "id": "1", "config": { "task_config": { "tasks": {
+            "PLAY_ON_DESKTOP": { "type": "PLAY_ON_DESKTOP", "target": 900 } } } } }] })).remove(0);
+        assert!(quest.eligible_application_ids.is_empty());
+        assert!(!quest.any_task);
     }
 
     #[test]

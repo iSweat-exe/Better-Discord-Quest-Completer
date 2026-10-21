@@ -112,12 +112,13 @@ function demoQuests(): QuestsResponse {
     fetchedAt: now,
     rawJson: "{}",
     quests: [
-      { id: "1", name: "Play Overwatch", gameTitle: "Overwatch", publisher: "Blizzard", applicationId: "356875221078245376", reward: "Orb Profile Effect", rewardOrbs: null, startsAt: now - 3 * day, expiresAt: now + 4 * day, tasks: play(900), status: "available", progressSeconds: null, completedAt: null, claimedAt: null },
-      { id: "2", name: "Fortnite quest", gameTitle: "Fortnite", publisher: "Epic Games", applicationId: "1402418703554842694", reward: "Avatar Decoration", rewardOrbs: null, startsAt: now - day, expiresAt: now + 9 * day, tasks: play(1800), status: "enrolled", progressSeconds: 420, completedAt: null, claimedAt: null },
-      { id: "3", name: "Watch the trailer", gameTitle: null, publisher: null, applicationId: null, reward: "100 Orbs", rewardOrbs: 100, startsAt: null, expiresAt: now + 2 * day, tasks: [{ kind: "watchVideo", targetSeconds: 30 }], status: "available", progressSeconds: null, completedAt: null, claimedAt: null },
-      { id: "4", name: "Mystery game", gameTitle: "Zzzzzz Qqqqqq", publisher: null, applicationId: "999", reward: null, rewardOrbs: null, startsAt: null, expiresAt: now + 5 * day, tasks: play(900), status: "available", progressSeconds: null, completedAt: null, claimedAt: null },
-      { id: "5", name: "Done last week", gameTitle: "Roblox", publisher: null, applicationId: "363445589247131668", reward: "Badge", rewardOrbs: null, startsAt: null, expiresAt: now - day, tasks: play(900), status: "completed", progressSeconds: 900, completedAt: now - 6 * day, claimedAt: null },
-      { id: "6", name: "Claimed last month", gameTitle: "Fortnite", publisher: "Epic Games", applicationId: "1402418703554842694", reward: "Orb Profile Effect", rewardOrbs: null, startsAt: null, expiresAt: now - 20 * day, tasks: play(900), status: "claimed", progressSeconds: 900, completedAt: now - 25 * day, claimedAt: now - 24 * day },
+      { id: "1", name: "Play Overwatch", gameTitle: "Overwatch", publisher: "Blizzard", eligibleApplicationIds: [], anyTask: false, applicationId: "356875221078245376", reward: "Orb Profile Effect", rewardOrbs: null, startsAt: now - 3 * day, expiresAt: now + 4 * day, tasks: play(900), status: "available", progressSeconds: null, completedAt: null, claimedAt: null },
+      { id: "2", name: "Fortnite quest", gameTitle: "Fortnite", publisher: "Epic Games", eligibleApplicationIds: [], anyTask: false, applicationId: "1402418703554842694", reward: "Avatar Decoration", rewardOrbs: null, startsAt: now - day, expiresAt: now + 9 * day, tasks: play(1800), status: "enrolled", progressSeconds: 420, completedAt: null, claimedAt: null },
+      { id: "3", name: "Watch the trailer", gameTitle: null, publisher: null, eligibleApplicationIds: [], anyTask: false, applicationId: null, reward: "100 Orbs", rewardOrbs: 100, startsAt: null, expiresAt: now + 2 * day, tasks: [{ kind: "watchVideo", targetSeconds: 30 }], status: "available", progressSeconds: null, completedAt: null, claimedAt: null },
+      { id: "7", name: "Watch the new season trailer", gameTitle: "Valorant", publisher: "Riot Games", eligibleApplicationIds: [], anyTask: false, applicationId: null, reward: "700 Orbs", rewardOrbs: 700, startsAt: null, expiresAt: now + 6 * day, tasks: [{ kind: "watchVideo", targetSeconds: 60 }], status: "available", progressSeconds: null, completedAt: null, claimedAt: null },
+      { id: "4", name: "Mystery game", gameTitle: "Zzzzzz Qqqqqq", publisher: null, eligibleApplicationIds: [], anyTask: false, applicationId: "999", reward: null, rewardOrbs: null, startsAt: null, expiresAt: now + 5 * day, tasks: play(900), status: "available", progressSeconds: null, completedAt: null, claimedAt: null },
+      { id: "5", name: "Done last week", gameTitle: "Roblox", publisher: null, eligibleApplicationIds: [], anyTask: false, applicationId: "363445589247131668", reward: "Badge", rewardOrbs: null, startsAt: null, expiresAt: now - day, tasks: play(900), status: "completed", progressSeconds: 900, completedAt: now - 6 * day, claimedAt: null },
+      { id: "6", name: "Claimed last month", gameTitle: "Fortnite", publisher: "Epic Games", eligibleApplicationIds: [], anyTask: false, applicationId: "1402418703554842694", reward: "Orb Profile Effect", rewardOrbs: null, startsAt: null, expiresAt: now - 20 * day, tasks: play(900), status: "claimed", progressSeconds: 900, completedAt: now - 25 * day, claimedAt: now - 24 * day },
     ],
   };
 }
@@ -297,16 +298,41 @@ export function installMockBackend(): void {
           return questsConnected ? demoQuests() : null;
 
         case "refresh_quests":
+        case "enroll_quest":
+        case "claim_quest_reward":
+        case "watch_quest_video":
           if (!questsConnected) throw new MockError("tokenMissing", "no token");
-          return demoQuests();
+          return undefined;
+
+        case "get_active_videos":
+        case "get_interrupted_videos":
+          return [];
+
+        case "dismiss_interrupted_videos":
+          return undefined;
+
+        case "get_quest_activity":
+          return [
+            { at: Date.now() - 3_600_000, kind: "video", questName: "Demo video quest", weight: 3, counted: true },
+            { at: Date.now() - 40 * 3_600_000, kind: "enroll", questName: "Older quest", weight: 1, counted: false },
+          ];
+
+        case "get_quest_risk":
+          return { level: "low", score: 2, writes: 2 };
 
         case "get_app_stats":
           return {
             questsCompleted: 2,
             orbsEarned: 1200,
+            timeSavedSeconds: 5400,
+            weekly: Array.from({ length: 8 }, (_, index) => ({
+              weekStart: Date.now() - (7 - index) * 7 * 86_400_000,
+              orbs: [0, 0, 200, 0, 500, 0, 0, 500][index] ?? 0,
+              quests: [0, 0, 1, 0, 1, 0, 0, 1][index] ?? 0,
+            })),
             recent: [
-              { questId: "6", name: "Claimed last month", orbs: 700, completedAt: Date.now() - 3 * 86_400_000 },
-              { questId: "5", name: "Done last week", orbs: 500, completedAt: Date.now() - 9 * 86_400_000 },
+              { questId: "6", name: "Claimed last month", orbs: 700, completedAt: Date.now() - 3 * 86_400_000, seconds: 900 },
+              { questId: "5", name: "Done last week", orbs: 500, completedAt: Date.now() - 9 * 86_400_000, seconds: 120 },
             ],
           };
 
@@ -317,6 +343,28 @@ export function installMockBackend(): void {
         case "get_orbs_balance":
           if (!questsConnected) throw new MockError("tokenMissing", "no token");
           return 1250;
+
+        case "get_orbs_shop":
+          if (!questsConnected) throw new MockError("tokenMissing", "no token");
+          return { unresolvedJson: "", categories: [
+            {
+              skuId: "1",
+              name: "Orbs exclusives",
+              summary: "Only for Orbs",
+              orbsExclusive: true,
+              products: [
+                { skuId: "11", name: "Aurora", summary: "Avatar decoration", kind: "avatarDecoration", orbPrice: 700, imageUrl: null, colors: ["#145444", "#02188e"], bundleSize: null },
+                { skuId: "12", name: "Sparkles", summary: "Profile effect", kind: "profileEffect", orbPrice: 1200, imageUrl: null, colors: ["#145444", "#02188e"], bundleSize: null },
+              ],
+            },
+            {
+              skuId: "2",
+              name: "Nameplates",
+              summary: null,
+              orbsExclusive: false,
+              products: [{ skuId: "21", name: "Neon", summary: null, kind: "nameplate", orbPrice: 450, imageUrl: null, colors: ["#145444", "#02188e"], bundleSize: null }],
+            },
+         ] };
 
         case "disconnect_quests":
           questsConnected = false;

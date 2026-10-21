@@ -13,6 +13,8 @@ const quest = (overrides: Partial<Quest>): Quest => ({
   gameTitle: null,
   publisher: null,
   applicationId: null,
+  eligibleApplicationIds: [],
+  anyTask: false,
   reward: null,
   rewardOrbs: null,
   startsAt: null,

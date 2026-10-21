@@ -32,11 +32,16 @@ use crate::process::sessions::SessionInfo;
 use crate::quest_watch;
 use crate::quests::QuestsResponse;
 use crate::quests::model::Profile;
+use crate::quests::risk::{ActivityEntry, RiskReport};
+use crate::quests::shop::ShopResponse;
 use crate::settings::{Settings, SettingsPatch};
-use crate::state::{EVENT_CATALOG_UPDATED, EVENT_UPDATE_PROGRESS, Shared};
+use crate::state::{
+    EVENT_CATALOG_UPDATED, EVENT_QUEST_VIDEO_ENDED, EVENT_QUEST_VIDEO_PROGRESS, EVENT_QUESTS_DISCONNECTED,
+    EVENT_QUESTS_UPDATED, EVENT_UPDATE_PROGRESS, Shared,
+};
 use crate::updates::UpdateInfo;
 use crate::stats::AppStats;
-use crate::util::spawn_blocking;
+use crate::util::{now_millis, spawn_blocking};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -268,10 +273,126 @@ pub async fn refresh_quests(app: AppHandle, state: State<'_, Shared>) -> AppResu
     Ok(sync.response)
 }
 
+/// Accepts a quest on the account. Only ever called from a click on that quest.
+#[tauri::command]
+pub async fn enroll_quest(app: AppHandle, state: State<'_, Shared>, quest_id: String) -> AppResult<QuestsResponse> {
+    let done = state.quests.enroll(&quest_id).await;
+    let sync = logged(&state, "Could not accept the quest", done)?;
+    quest_watch::apply(&app, sync.changes);
+    Ok(sync.response)
+}
+
+/// Claims the reward of a completed quest.
+#[tauri::command]
+pub async fn claim_quest_reward(app: AppHandle, state: State<'_, Shared>, quest_id: String) -> AppResult<QuestsResponse> {
+    let done = state.quests.claim_reward(&quest_id).await;
+    let sync = logged(&state, "Could not claim the quest reward", done)?;
+    quest_watch::apply(&app, sync.changes);
+    Ok(sync.response)
+}
+
+/// Payload of [`EVENT_QUEST_VIDEO_PROGRESS`].
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoProgress {
+    pub quest_id: String,
+    pub seconds: u64,
+    pub target: u64,
+}
+
+/// Payload of [`EVENT_QUEST_VIDEO_ENDED`].
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoEnded {
+    pub quest_id: String,
+    pub name: String,
+    pub ok: bool,
+    pub message: Option<String>,
+}
+
+/// Starts watching the video of an accepted quest, one reported second per second: as long as the video itself.
+/// The viewing goes on in the background, whatever the user does in the app; its end is an event.
+#[tauri::command]
+pub async fn watch_quest_video(app: AppHandle, state: State<'_, Shared>, quest_id: String) -> AppResult<()> {
+    if !state.quests.begin_video(&quest_id) {
+        return Ok(());
+    }
+    let shared = Arc::clone(state.inner());
+    tauri::async_runtime::spawn(async move { run_video(app, shared, quest_id).await });
+    Ok(())
+}
+
+async fn run_video(app: AppHandle, state: Shared, quest_id: String) {
+    let name = state.quests.quest_name(&quest_id);
+    let result = state
+        .quests
+        .watch_video(&quest_id, |seconds, target| {
+            state.quests.set_video_progress(&quest_id, seconds, target);
+            let _ = app.emit(
+                EVENT_QUEST_VIDEO_PROGRESS,
+                VideoProgress { quest_id: quest_id.clone(), seconds, target },
+            );
+        })
+        .await;
+    state.quests.end_video(&quest_id);
+
+    let ended = match result {
+        Ok(sync) => {
+            quest_watch::credit_video(&app, &sync.response.quests, &quest_id);
+            quest_watch::apply(&app, sync.changes);
+            let _ = app.emit(EVENT_QUESTS_UPDATED, sync.response);
+            VideoEnded { quest_id, name, ok: true, message: None }
+        }
+        Err(error) => {
+            state.log.error(format!("Could not complete the quest video: {error}"));
+            if matches!(error, AppError::TokenInvalid) {
+                let _ = app.emit(EVENT_QUESTS_DISCONNECTED, ());
+            }
+            VideoEnded { quest_id, name, ok: false, message: Some(error.to_string()) }
+        }
+    };
+    let _ = app.emit(EVENT_QUEST_VIDEO_ENDED, ended);
+}
+
+/// The videos being watched now, so the UI can pick them up after a reload.
+#[tauri::command]
+pub fn get_active_videos(state: State<'_, Shared>) -> Vec<VideoProgress> {
+    state
+        .quests
+        .active_videos()
+        .into_iter()
+        .map(|(quest_id, seconds, target)| VideoProgress { quest_id, seconds, target })
+        .collect()
+}
+
+/// The videos that were being watched when the app was closed.
+#[tauri::command]
+pub fn get_interrupted_videos(state: State<'_, Shared>) -> Vec<String> {
+    state.quests.interrupted_videos()
+}
+
+/// The user does not want to resume the interrupted videos.
+#[tauri::command]
+pub fn dismiss_interrupted_videos(state: State<'_, Shared>) {
+    state.quests.dismiss_interrupted_videos();
+}
+
+/// The writes made on the account, newest first.
+#[tauri::command]
+pub fn get_quest_activity(state: State<'_, Shared>) -> Vec<ActivityEntry> {
+    state.quests.activity()
+}
+
+/// How suspicious the recent writes on the account look (see `quests::risk`).
+#[tauri::command]
+pub fn get_quest_risk(state: State<'_, Shared>) -> RiskReport {
+    state.quests.risk()
+}
+
 /// What the app itself helped complete (the account's own totals come from the quests).
 #[tauri::command]
 pub fn get_app_stats(state: State<'_, Shared>) -> AppStats {
-    state.stats.summary()
+    state.stats.summary(now_millis())
 }
 
 /// Who the saved token belongs to. Only the public identity is returned.
@@ -284,6 +405,12 @@ pub async fn get_profile(state: State<'_, Shared>) -> AppResult<Profile> {
 #[tauri::command]
 pub async fn get_orbs_balance(state: State<'_, Shared>) -> AppResult<u64> {
     state.quests.orbs_balance().await
+}
+
+/// What the Orbs shop sells. Like the balance, a nicety: failures stay out of the log.
+#[tauri::command]
+pub async fn get_orbs_shop(state: State<'_, Shared>) -> AppResult<ShopResponse> {
+    state.quests.orbs_shop().await
 }
 
 #[tauri::command]

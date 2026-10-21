@@ -136,6 +136,10 @@ export interface Quest {
   publisher: string | null;
   /** Discord application id of the game: matches catalog game ids. */
   applicationId: string | null;
+  /** Every game the quest accepts; more than one for a franchise-wide quest. */
+  eligibleApplicationIds: string[];
+  /** One of the tasks is enough (e.g. PC or console). */
+  anyTask: boolean;
   reward: string | null;
   /** Orbs the reward grants, when it is Orbs. */
   rewardOrbs: number | null;
@@ -158,12 +162,25 @@ export interface CompletedQuest {
   orbs: number | null;
   /** Unix milliseconds. */
   completedAt: number;
+  /** What the quest asked for (play or video time), in seconds. */
+  seconds: number | null;
+}
+
+/** One week of what the app completed (Monday 00:00 UTC to the next). */
+export interface WeekStats {
+  weekStart: number;
+  orbs: number;
+  quests: number;
 }
 
 /** What the app itself helped complete; the account's own totals come from the quests. */
 export interface AppStats {
   questsCompleted: number;
   orbsEarned: number;
+  /** Play and video time the app did in the user's place, in seconds. */
+  timeSavedSeconds: number;
+  /** The last weeks, oldest first, empty weeks included. */
+  weekly: WeekStats[];
   /** The latest ones, newest first. */
   recent: CompletedQuest[];
 }
@@ -172,6 +189,43 @@ export interface AppStats {
 export interface QuestDone {
   questId: string;
   name: string;
+}
+
+/** How suspicious the recent writes on the account look (see `quests/risk.rs`). */
+export type RiskLevel = "low" | "medium" | "high";
+
+export interface QuestRisk {
+  level: RiskLevel;
+  score: number;
+  /** Writes in the last 24 hours. */
+  writes: number;
+}
+
+export type WriteKind = "enroll" | "claim" | "video";
+
+/** One write made on the account (see `quests/risk.rs`). */
+export interface ActivityEntry {
+  at: number;
+  kind: WriteKind;
+  questName: string;
+  weight: number;
+  /** Still counted in the risk level (made in the last 24 hours). */
+  counted: boolean;
+}
+
+/** The app stopped watching a video of a quest, done or not. */
+export interface VideoEnded {
+  questId: string;
+  name: string;
+  ok: boolean;
+  message: string | null;
+}
+
+/** A second more of a video quest was reported to Discord (see `commands.rs`). */
+export interface VideoProgress {
+  questId: string;
+  seconds: number;
+  target: number;
 }
 
 /** A newer version of the app (see `updates.rs`). */
@@ -207,6 +261,43 @@ export interface QuestsResponse {
   fetchedAt: number;
   /** Discord's answer as received (it never contains the token). */
   rawJson: string;
+}
+
+export type ShopProductKind =
+  | "avatarDecoration"
+  | "profileEffect"
+  | "nameplate"
+  | "profileFrame"
+  | "bundle"
+  | "other";
+
+export interface ShopProduct {
+  skuId: string;
+  name: string;
+  summary: string | null;
+  kind: ShopProductKind;
+  /** Price in Orbs; `null` when the product cannot be bought with them. */
+  orbPrice: number | null;
+  imageUrl: string | null;
+  /** `#rrggbb` colors of the product; often the only visual of an item without image. */
+  colors: string[];
+  /** Number of products a bundle holds. */
+  bundleSize: number | null;
+}
+
+export interface ShopCategory {
+  skuId: string;
+  name: string;
+  summary: string | null;
+  /** The collection can only be bought with Orbs. */
+  orbsExclusive: boolean;
+  products: ShopProduct[];
+}
+
+export interface ShopResponse {
+  categories: ShopCategory[];
+  /** Discord's description of the products left without an image; empty when there are none. */
+  unresolvedJson: string;
 }
 
 export interface StorageInfo {

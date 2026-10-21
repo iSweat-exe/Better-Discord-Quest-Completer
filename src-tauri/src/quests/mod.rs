@@ -5,10 +5,11 @@
 //! account's token, which makes this module the most sensitive part of the app.
 //! It therefore sticks to a strict contract:
 //!
-//! * **read-only**: only `GET` requests (the quests, the Orbs balance and the
+//! * **reads** with `GET` (the quests, the Orbs balance, the Orbs shop and the
 //!   account's public profile — nothing else of the account is ever read);
-//!   nothing is ever accepted, started, claimed or completed through the
-//!   account — quests are still completed by the fake games, exactly as before;
+//! * **writes** only on a click of the user, on one quest: accepting it,
+//!   claiming its reward, or reporting the progress of its video. Nothing is
+//!   written in the background; "play" quests are still completed by the fake games;
 //! * **paced**: [`crate::quest_watch`] looks at the quests once a minute while
 //!   a fake game runs, and every 20 minutes otherwise (only to announce new
 //!   quests, and only if the user wants those notifications);
@@ -18,9 +19,12 @@
 
 pub mod client;
 pub mod model;
+pub mod risk;
+pub mod shop;
 pub mod token;
 pub mod tracker;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -32,8 +36,32 @@ use crate::storage;
 use crate::util::{now_millis, spawn_blocking};
 
 use self::model::{Profile, Quest, parse_orbs_balance, parse_profile, parse_quests};
+use self::risk::{ActivityEntry, RiskLog, RiskReport, WriteKind};
+use self::shop::{ShopResponse, read_shop};
 use self::token::{SystemStore, Token, TokenStore};
 use self::tracker::{QuestChanges, QuestTracker};
+
+/// Video progress is reported one second at a time, once a second, like a player would.
+const VIDEO_STEP_SECONDS: u64 = 1;
+const VIDEO_LEAD_SECONDS: u64 = 10;
+/// Bounds the loop of [`QuestService::watch_video`] (about an hour).
+const VIDEO_MAX_REPORTS: u32 = 3600;
+
+/// For a quest of `answer` that was accepted and asks to watch a video: the
+/// seconds to watch, the seconds already watched, and when it was accepted (Unix ms).
+fn video_plan(answer: &serde_json::Value, quest_id: &str) -> Option<(u64, u64, i64)> {
+    let quest = parse_quests(answer).into_iter().find(|quest| quest.id == quest_id)?;
+    let target = quest
+        .tasks
+        .iter()
+        .find(|task| matches!(task.kind, model::TaskKind::WatchVideo | model::TaskKind::WatchVideoOnMobile))?
+        .target_seconds;
+    let raw = answer.get("quests")?.as_array()?.iter().find(|raw| raw.get("id").is_some_and(|id| id.as_str() == Some(quest_id)))?;
+    let status = raw.get("user_status").or_else(|| raw.get("userStatus"))?;
+    let enrolled = status.get("enrolled_at").or_else(|| status.get("enrolledAt"))?.as_str()?;
+    let enrolled_at = chrono::DateTime::parse_from_rfc3339(enrolled).ok()?.timestamp_millis();
+    Some((target, quest.progress_seconds.unwrap_or(0), enrolled_at))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -62,6 +90,13 @@ pub struct QuestService {
     /// starts instead of after a round trip to Discord.
     cache_file: PathBuf,
     cache: Mutex<Option<QuestsResponse>>,
+    /// The writes made on the account, for the suspicion indicator.
+    risk: Mutex<RiskLog>,
+    /// Videos being watched right now: seconds reported, seconds to watch.
+    active_videos: Mutex<HashMap<String, (u64, u64)>>,
+    /// Videos that were being watched when the app was closed: ids Discord may resume.
+    interrupted_videos: Mutex<Vec<String>>,
+    video_file: PathBuf,
 }
 
 impl QuestService {
@@ -79,13 +114,18 @@ impl QuestService {
     ) -> AppResult<Self> {
         // A cache that cannot be read is just a cache that is empty.
         let cached = storage::read_json(&cache_file).ok().flatten();
+        let video_file = cache_file.with_file_name("quests-video-watch.json");
         Ok(Self {
             client: client::build()?,
             store,
             log,
             tracker: Mutex::new(tracker),
-            cache_file,
             cache: Mutex::new(cached),
+            risk: Mutex::new(RiskLog::load(cache_file.with_file_name("quests-activity.json"))),
+            active_videos: Mutex::new(HashMap::new()),
+            interrupted_videos: Mutex::new(storage::read_json(&video_file).ok().flatten().unwrap_or_default()),
+            video_file,
+            cache_file,
         })
     }
 
@@ -137,6 +177,137 @@ impl QuestService {
         let answer = client::fetch_orbs_balance(&self.client, &token).await;
         let answer = self.forget_if_rejected(answer).await?;
         parse_orbs_balance(&answer).ok_or_else(|| AppError::Network("Discord's Orbs answer is not understood".into()))
+    }
+
+    /// What the Orbs shop sells.
+    pub async fn orbs_shop(&self) -> AppResult<ShopResponse> {
+        let token = self.saved_token().await?;
+        let answer = client::fetch_orbs_shop(&self.client, &token).await;
+        let answer = self.forget_if_rejected(answer).await?;
+        Ok(read_shop(&answer))
+    }
+
+    /// Accepts a quest, then reloads the quests.
+    pub async fn enroll(&self, quest_id: &str) -> AppResult<QuestSync> {
+        let token = self.saved_token().await?;
+        let done = client::enroll_quest(&self.client, &token, quest_id).await;
+        self.forget_if_rejected(done).await?;
+        self.log.warn(format!("Account write: quest {quest_id} accepted on the user's request."));
+        self.record_write(WriteKind::Enroll, quest_id);
+        self.refresh().await
+    }
+
+    /// Claims the reward of a completed quest, then reloads the quests.
+    pub async fn claim_reward(&self, quest_id: &str) -> AppResult<QuestSync> {
+        let token = self.saved_token().await?;
+        let done = client::claim_quest_reward(&self.client, &token, quest_id).await;
+        self.forget_if_rejected(done).await?;
+        self.log.warn(format!("Account write: reward of quest {quest_id} claimed on the user's request."));
+        self.record_write(WriteKind::Claim, quest_id);
+        self.refresh().await
+    }
+
+    /// Reports the progress of a video quest until Discord marks it completed,
+    /// pacing the reports the way the video player would (Discord refuses a
+    /// progress that is ahead of the time since the quest was accepted).
+    /// `on_progress(done, target)` is called with the seconds watched so far, after each report.
+    pub async fn watch_video(&self, quest_id: &str, on_progress: impl Fn(u64, u64)) -> AppResult<QuestSync> {
+        let token = self.saved_token().await?;
+        let answer = client::fetch_quests(&self.client, &token).await;
+        let answer = self.forget_if_rejected(answer).await?;
+        let (target, mut done, enrolled_at) = video_plan(&answer, quest_id)
+            .ok_or_else(|| AppError::Network("This quest has no video to watch, or was not accepted yet".into()))?;
+
+        self.log.warn(format!("Account write: reporting the video progress of quest {quest_id} ({target} s) on the user's request."));
+        self.record_write(WriteKind::Video, quest_id);
+        for _ in 0..VIDEO_MAX_REPORTS {
+            let allowed = u64::try_from(now_millis().saturating_sub(enrolled_at) / 1000).unwrap_or(0) + VIDEO_LEAD_SECONDS;
+            if done + VIDEO_STEP_SECONDS <= allowed || done >= target {
+                done = (done + VIDEO_STEP_SECONDS).min(target);
+                let reply = client::post_video_progress(&self.client, &token, quest_id, done).await;
+                let reply = self.forget_if_rejected(reply).await?;
+                on_progress(done, target);
+                if reply.get("completed_at").is_some_and(|value| !value.is_null()) || done >= target {
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+        self.refresh().await
+    }
+
+    /// How suspicious the recent writes on the account look.
+    pub fn risk(&self) -> RiskReport {
+        self.risk.lock().unwrap_or_else(PoisonError::into_inner).assess(now_millis())
+    }
+
+    /// The writes made on the account, newest first.
+    pub fn activity(&self) -> Vec<ActivityEntry> {
+        self.risk.lock().unwrap_or_else(PoisonError::into_inner).history(now_millis())
+    }
+
+    /// The name of a quest of the last answer (its id when it is unknown).
+    pub fn quest_name(&self, quest_id: &str) -> String {
+        let cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
+        cache
+            .as_ref()
+            .and_then(|response| response.quests.iter().find(|quest| quest.id == quest_id))
+            .map_or_else(|| quest_id.to_owned(), |quest| quest.name.clone())
+    }
+
+    fn record_write(&self, kind: WriteKind, quest_id: &str) {
+        let name = self.quest_name(quest_id);
+        if let Err(error) = self.risk.lock().unwrap_or_else(PoisonError::into_inner).record(kind, &name, now_millis()) {
+            self.log.warn(format!("Could not save the write history: {error}"));
+        }
+    }
+
+    /// Marks a video as being watched. `false` when it already is.
+    pub fn begin_video(&self, quest_id: &str) -> bool {
+        {
+            let mut active = self.active_videos.lock().unwrap_or_else(PoisonError::into_inner);
+            if active.contains_key(quest_id) {
+                return false;
+            }
+            active.insert(quest_id.to_owned(), (0, 0));
+        }
+        self.interrupted_videos.lock().unwrap_or_else(PoisonError::into_inner).retain(|id| id != quest_id);
+        self.persist_videos();
+        true
+    }
+
+    pub fn set_video_progress(&self, quest_id: &str, done: u64, target: u64) {
+        self.active_videos.lock().unwrap_or_else(PoisonError::into_inner).insert(quest_id.to_owned(), (done, target));
+    }
+
+    pub fn end_video(&self, quest_id: &str) {
+        self.active_videos.lock().unwrap_or_else(PoisonError::into_inner).remove(quest_id);
+        self.persist_videos();
+    }
+
+    /// Videos being watched: quest id, seconds reported, seconds to watch.
+    pub fn active_videos(&self) -> Vec<(String, u64, u64)> {
+        let active = self.active_videos.lock().unwrap_or_else(PoisonError::into_inner);
+        active.iter().map(|(id, (done, target))| (id.clone(), *done, *target)).collect()
+    }
+
+    /// Videos that were being watched when the app last closed.
+    pub fn interrupted_videos(&self) -> Vec<String> {
+        self.interrupted_videos.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    pub fn dismiss_interrupted_videos(&self) {
+        self.interrupted_videos.lock().unwrap_or_else(PoisonError::into_inner).clear();
+        self.persist_videos();
+    }
+
+    /// What is on disk: the videos being watched, and the interrupted ones not dealt with yet.
+    fn persist_videos(&self) {
+        let mut ids: Vec<String> = self.active_videos.lock().unwrap_or_else(PoisonError::into_inner).keys().cloned().collect();
+        ids.extend(self.interrupted_videos.lock().unwrap_or_else(PoisonError::into_inner).iter().cloned());
+        if let Err(error) = storage::write_json(&self.video_file, &ids) {
+            self.log.warn(format!("Could not save the videos being watched: {error}"));
+        }
     }
 
     /// Forgets the token.
@@ -272,6 +443,13 @@ mod tests {
     fn the_orbs_balance_needs_a_token_too() {
         let (_dir, service) = service();
         let error = tauri::async_runtime::block_on(service.orbs_balance()).unwrap_err();
+        assert_eq!(error.kind(), "tokenMissing");
+    }
+
+    #[test]
+    fn the_shop_needs_a_token_too() {
+        let (_dir, service) = service();
+        let error = tauri::async_runtime::block_on(service.orbs_shop()).unwrap_err();
         assert_eq!(error.kind(), "tokenMissing");
     }
 

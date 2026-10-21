@@ -15,6 +15,7 @@ import { AUTHOR_HANDLE, AUTHOR_URL } from "@/lib/links";
 import { questStats } from "@/lib/stats";
 import { useNow } from "@/lib/use-now";
 
+import { ActivityHistory, WeeklyOrbs } from "./profile-sections";
 import { useAppStats } from "./queries";
 
 /** Shown while a figure is not known (loading, or Discord did not answer). */
@@ -30,10 +31,10 @@ interface StatProps {
 function Stat({ label, value, hint, icon }: StatProps) {
   return (
     <div className="rounded-card bg-surface p-4 shadow-card">
-      <p className="flex items-center gap-2 text-[13px] text-muted [&_svg]:size-4 [&_svg]:shrink-0">
+      <div className="flex items-center gap-2 text-[13px] text-muted [&_svg]:size-4 [&_svg]:shrink-0">
         {icon}
         {label}
-      </p>
+      </div>
       <p className="mt-2 text-2xl font-semibold tabular-nums tracking-tight">{value}</p>
       {hint ? <p className="mt-1 text-xs leading-snug text-subtle">{hint}</p> : null}
     </div>
@@ -123,10 +124,20 @@ function ProfileStats() {
         <div className="grid grid-cols-3 gap-3">
           <Stat icon={<ClockIcon />} label={t("profile.activity.playtime")} value={formatDuration(playtime)} />
           <Stat icon={<Gamepad2Icon />} label={t("profile.activity.games")} value={formatNumber(library.length, locale)} />
+          <Stat
+            icon={<ClockIcon />}
+            label={t("profile.activity.timeSaved")}
+            value={appStats.data ? formatDuration(appStats.data.timeSavedSeconds) : UNKNOWN}
+            hint={t("profile.activity.timeSavedHint")}
+          />
         </div>
       </Group>
 
-      <Group title={t("profile.recent")} delay={3}>
+      <Group title={t("profile.weekly.title")} delay={3}>
+        {appStats.data ? <WeeklyOrbs weeks={appStats.data.weekly} /> : null}
+      </Group>
+
+      <Group title={t("profile.recent")} delay={4}>
         {appStats.data && appStats.data.recent.length > 0 ? (
           <ol className="rounded-card bg-surface p-1.5 shadow-card">
             {appStats.data.recent.map((quest) => (
@@ -150,6 +161,10 @@ function ProfileStats() {
         ) : (
           <p className="rounded-card bg-surface px-4 py-5 text-sm text-muted shadow-card">{t("profile.recent.empty")}</p>
         )}
+      </Group>
+
+      <Group title={t("profile.history.title")} delay={5}>
+        <ActivityHistory now={now} />
       </Group>
     </>
   );

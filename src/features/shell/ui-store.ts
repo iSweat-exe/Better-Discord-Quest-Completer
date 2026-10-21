@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type Page = "games" | "quests" | "presence" | "logs" | "settings" | "profile";
+export type Page = "games" | "quests" | "shop" | "presence" | "logs" | "settings" | "profile";
 
 interface UiState {
   page: Page;

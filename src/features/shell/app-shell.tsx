@@ -12,6 +12,7 @@ import { useUiStore, type Page } from "./ui-store";
 // Secondary pages are rarely opened: keep them out of the initial bundle...
 const loaders = {
   quests: () => import("@/features/quests/quests-page"),
+  shop: () => import("@/features/shop/shop-page"),
   presence: () => import("@/features/presence/presence-page"),
   logs: () => import("@/features/logs/logs-page"),
   settings: () => import("@/features/settings/settings-page"),
@@ -19,6 +20,7 @@ const loaders = {
 };
 
 const QuestsPage = lazy(loaders.quests);
+const ShopPage = lazy(loaders.shop);
 const PresencePage = lazy(loaders.presence);
 const LogsPage = lazy(loaders.logs);
 const SettingsPage = lazy(loaders.settings);
@@ -27,6 +29,7 @@ const ProfilePage = lazy(loaders.profile);
 const PAGES: readonly { page: Page; view: ReactNode }[] = [
   { page: "games", view: <GamesPage /> },
   { page: "quests", view: <QuestsPage /> },
+  { page: "shop", view: <ShopPage /> },
   { page: "presence", view: <PresencePage /> },
   { page: "logs", view: <LogsPage /> },
   { page: "settings", view: <SettingsPage /> },

@@ -144,8 +144,16 @@ pub fn apply(app: &AppHandle, changes: QuestChanges) {
     if !changes.new.is_empty() {
         state.log.info(format!("{} new Discord quest(s).", changes.new.len()));
         if settings.notify_new_quests && unseen {
-            let names = names(&changes.new);
-            notify(app, lang.new_quests_title(names.len()), &lang.new_quests_body(&names));
+            // Video quests are told apart: they are not done by playing a game.
+            let (videos, others): (Vec<&Quest>, Vec<&Quest>) = changes.new.iter().partition(|quest| quest.is_video());
+            let others = names_of(&others);
+            if !others.is_empty() {
+                notify(app, lang.new_quests_title(others.len()), &lang.new_quests_body(&others));
+            }
+            let videos = names_of(&videos);
+            if !videos.is_empty() {
+                notify(app, lang.new_video_quests_title(videos.len()), &lang.new_video_quests_body(&videos));
+            }
         }
     }
 
@@ -166,11 +174,25 @@ fn credit_the_app(app: &AppHandle, quest: &Quest) {
         return;
     }
 
+    record_credit(app, quest, now);
+}
+
+/// Counts a video quest the app watched, once Discord confirms it.
+pub fn credit_video(app: &AppHandle, quests: &[Quest], quest_id: &str) {
+    let Some(quest) = quests.iter().find(|quest| quest.id == quest_id && !quest.status.is_unfinished()) else {
+        return;
+    };
+    record_credit(app, quest, now_millis());
+}
+
+fn record_credit(app: &AppHandle, quest: &Quest, now: i64) {
+    let state = app.state::<Shared>();
     let entry = CompletedQuest {
         quest_id: quest.id.clone(),
         name: quest.name.clone(),
         orbs: quest.reward_orbs,
         completed_at: quest.completed_at.unwrap_or(now),
+        seconds: quest.objective_seconds(),
     };
     match state.stats.record(entry) {
         Ok(true) => {
@@ -223,6 +245,10 @@ fn names(quests: &[Quest]) -> Vec<&str> {
     quests.iter().map(|quest| quest.name.as_str()).collect()
 }
 
+fn names_of<'a>(quests: &[&'a Quest]) -> Vec<&'a str> {
+    quests.iter().map(|quest| quest.name.as_str()).collect()
+}
+
 fn notify(app: &AppHandle, title: &str, body: &str) {
     let _ = app.notification().builder().title(title).body(body).show();
 }
@@ -240,6 +266,8 @@ mod tests {
             game_title: None,
             publisher: None,
             application_id: application_id.map(str::to_owned),
+            eligible_application_ids: Vec::new(),
+            any_task: false,
             reward: None,
             reward_orbs: None,
             starts_at: None,

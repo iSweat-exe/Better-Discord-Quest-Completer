@@ -11,6 +11,7 @@ mod disk;
 mod discord;
 mod error;
 mod games;
+mod http;
 mod launcher;
 mod lifecycle;
 mod locale;
@@ -80,9 +81,18 @@ pub fn run() {
             commands::install_update,
             commands::get_cached_quests,
             commands::refresh_quests,
+            commands::enroll_quest,
+            commands::claim_quest_reward,
+            commands::watch_quest_video,
+            commands::get_quest_risk,
+            commands::get_quest_activity,
+            commands::get_active_videos,
+            commands::get_interrupted_videos,
+            commands::dismiss_interrupted_videos,
             commands::get_app_stats,
             commands::get_profile,
             commands::get_orbs_balance,
+            commands::get_orbs_shop,
             commands::disconnect_quests,
             commands::get_discord_status,
             commands::check_detection,

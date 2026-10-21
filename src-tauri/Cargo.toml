@@ -1,6 +1,6 @@
 [package]
 name = "discord-quest-completer"
-version = "2.0.0"
+version = "2.1.0"
 description = "Validez vos Quêtes Discord sans installer les jeux."
 authors = ["iSweat-exe", "Discord Quest Completer contributors"]
 license = "MIT"

@@ -106,6 +106,24 @@ impl Lang {
         }
     }
 
+    pub fn new_video_quests_title(self, count: usize) -> &'static str {
+        match (self, count) {
+            (Self::Fr, 1) => "Nouvelle quête vidéo",
+            (Self::Fr, _) => "Nouvelles quêtes vidéo",
+            (Self::En, 1) => "New video quest",
+            (Self::En, _) => "New video quests",
+        }
+    }
+
+    pub fn new_video_quests_body(self, names: &[&str]) -> String {
+        match (self, names) {
+            (Self::Fr, [name]) => format!("{name} : acceptez-la puis lancez le visionnage depuis l'application."),
+            (Self::En, [name]) => format!("{name}: accept it, then start the viewing from the app."),
+            (Self::Fr, _) => format!("{} quêtes vidéo sont disponibles.", names.len()),
+            (Self::En, _) => format!("{} video quests are available.", names.len()),
+        }
+    }
+
     pub fn expiring_quests_title(self, count: usize) -> &'static str {
         match (self, count) {
             (Self::Fr, 1) => "Une quête expire bientôt",
