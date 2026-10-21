@@ -1,0 +1,13 @@
+target/
+node_modules/
+dist/
+src-tauri/gen/
+runner/target/
+*.log
+.DS_Store
+.impeccable/
+
+# Secrets: signing keys of the updater. Never commit them.
+.secrets/
+*.key
+*.pem

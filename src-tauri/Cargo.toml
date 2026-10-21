@@ -1,0 +1,43 @@
+[package]
+name = "discord-quest-completer"
+version = "2.0.0"
+description = "Validez vos Quêtes Discord sans installer les jeux."
+authors = ["iSweat-exe", "Discord Quest Completer contributors"]
+license = "MIT"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+
+[lib]
+name = "dqc_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["time", "sync"] }
+reqwest = { version = "0.12", default-features = false, features = ["default-tls", "gzip", "brotli"] }
+discord-rich-presence = "1"
+sys-locale = "0.3"
+keyring = { version = "3", default-features = false, features = ["windows-native"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+[target.'cfg(windows)'.dependencies.windows-sys]
+version = "0.61"
+features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects"]
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
