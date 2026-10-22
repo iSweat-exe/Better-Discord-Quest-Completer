@@ -1,6 +1,6 @@
 [package]
 name = "discord-quest-completer"
-version = "2.1.0"
+version = "2.1.1"
 description = "Validez vos Quêtes Discord sans installer les jeux."
 authors = ["iSweat-exe", "Discord Quest Completer contributors"]
 license = "MIT"
@@ -31,6 +31,8 @@ discord-rich-presence = "1"
 sys-locale = "0.3"
 keyring = { version = "3", default-features = false, features = ["windows-native"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# Resizes the game icons and writes them as one .ico, so no size is stretched from another.
+image = { version = "0.25", default-features = false, features = ["png", "ico"] }
 
 [target.'cfg(windows)'.dependencies.windows-sys]
 version = "0.61"

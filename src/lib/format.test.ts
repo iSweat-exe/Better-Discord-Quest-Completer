@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatBytes, formatClock, formatDuration, formatRelativeTime } from "./format";
+import { formatBytes, formatClock, formatDuration, formatRelativeTime, initialOf } from "./format";
 
 describe("formatClock", () => {
   it("pads minutes and seconds", () => {
@@ -61,5 +61,26 @@ describe("formatDuration", () => {
 
   it("clamps negative values", () => {
     expect(formatDuration(-10)).toBe("0 s");
+  });
+});
+
+describe("initialOf", () => {
+  it("is the first letter, upper-cased", () => {
+    expect(initialOf("nelly")).toBe("N");
+    expect(initialOf("  éloïse")).toBe("É");
+  });
+
+  it("skips decorations and emoji before the name", () => {
+    expect(initialOf("✿ Cypr3s (E-Girls)")).toBe("C");
+    expect(initialOf("🎮 gamer")).toBe("G");
+  });
+
+  it("reads a letter of a stylized alphabet as itself", () => {
+    expect(initialOf("𝓒𝔂𝓹𝓻")).toBe("𝓒");
+  });
+
+  it("falls back to a question mark when there is no letter at all", () => {
+    expect(initialOf("")).toBe("?");
+    expect(initialOf("✿✿")).toBe("?");
   });
 });

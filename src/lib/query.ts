@@ -24,6 +24,7 @@ export const queryKeys = {
   appStats: ["app-stats"],
   questRisk: ["quest-risk"],
   questActivity: ["quest-activity"],
+  gameHue: ["game-hue"],
   interruptedVideos: ["interrupted-videos"],
 } as const;
 

@@ -3,6 +3,7 @@
 
 pub mod catalog;
 pub mod executable;
+pub mod icon;
 pub mod library;
 pub mod model;
 pub mod transfer;

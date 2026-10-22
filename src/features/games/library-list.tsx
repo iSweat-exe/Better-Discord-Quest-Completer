@@ -132,7 +132,7 @@ export function LibraryList({ entries, selectedId, onSelect }: LibraryListProps)
     <section aria-labelledby="library-heading" className="flex min-h-0 flex-col rounded-card bg-surface shadow-card">
       <div className="flex items-center justify-between gap-2 px-5 pb-2 pt-3.5">
         <div className="flex items-baseline gap-2">
-          <h2 id="library-heading" className="text-xs font-semibold uppercase tracking-wider text-subtle">
+          <h2 id="library-heading" className="text-[13px] font-semibold text-subtle">
             {t("games.libraryTitle")}
           </h2>
           <span className="text-xs tabular-nums text-subtle">

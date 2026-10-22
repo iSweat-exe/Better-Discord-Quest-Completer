@@ -20,6 +20,7 @@ import { DetectionPanel } from "./detection-panel";
 import { ExecutableList } from "./executable-list";
 import { QuestTimer } from "./quest-timer";
 import { useRemoveFromLibrary } from "./queries";
+import { useGameHue } from "./use-game-hue";
 
 function PlaytimeLine({ entry }: { entry: LibraryEntry }) {
   const { t, locale } = useT();
@@ -39,6 +40,7 @@ function PlaytimeLine({ entry }: { entry: LibraryEntry }) {
 export function GameDetail({ entry }: { entry: LibraryEntry }) {
   const { t } = useT();
   const { game } = entry;
+  const hue = useGameHue(game.id, game.iconHash);
 
   const allSessions = useSessionStore((state) => state.sessions);
   const sessions = useMemo(
@@ -120,7 +122,7 @@ export function GameDetail({ entry }: { entry: LibraryEntry }) {
       </header>
 
       <div className="flex flex-col gap-6 px-6 pb-6">
-        {timerSession ? <QuestTimer session={timerSession} /> : null}
+        {timerSession ? <QuestTimer session={timerSession} hue={hue} /> : null}
         {timerSession ? <DetectionPanel key={timerSession.id} session={timerSession} /> : null}
 
         <ExecutableList

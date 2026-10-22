@@ -224,7 +224,10 @@ function QuestBoard() {
 
             {visible.length === 0 ? (
               <div className="rounded-card bg-surface shadow-card">
-                <EmptyState icon={<TrophyIcon />} title={t(filter === "todo" ? "quests.empty.todo" : "quests.empty.done")} />
+                <EmptyState
+                  {...(filter === "todo" ? {} : { icon: <TrophyIcon /> })}
+                  title={t(filter === "todo" ? "quests.empty.todo" : "quests.empty.done")}
+                />
               </div>
             ) : (
               <ul className="flex flex-col gap-3">

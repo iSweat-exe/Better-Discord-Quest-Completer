@@ -29,7 +29,8 @@ function PathBreadcrumb({ name, muted = false }: { name: string; muted?: boolean
     >
       <bdi dir="ltr">
         {folders.map((folder, index) => (
-          <Fragment key={`${folder}-${index.toString()}`}>
+          // The path up to a folder is unique and stable, unlike its position among equal names.
+          <Fragment key={folders.slice(0, index + 1).join("/")}>
             <span className="text-muted">{folder}</span>
             <ChevronRightIcon size={12} className="mx-0.5 inline align-[-1px] text-subtle" />
           </Fragment>

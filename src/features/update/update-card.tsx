@@ -1,5 +1,6 @@
 import { DownloadIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
+import { ProgressBar } from "@/components/ui/progress-bar";
 import { useT } from "@/lib/i18n/use-t";
 
 import { downloadPercent, useUpdateStore } from "./update-store";
@@ -28,19 +29,7 @@ export function UpdateCard() {
 
       {downloading ? (
         <div className="mt-3">
-          <div
-            role="progressbar"
-            aria-label={t("update.progressLabel")}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            {...(percent !== null ? { "aria-valuenow": percent } : {})}
-            className="h-1.5 overflow-hidden rounded-full bg-sunken"
-          >
-            <div
-              className="h-full rounded-full bg-accent-text transition-[width] duration-300 ease-out motion-reduce:transition-none"
-              style={{ width: `${(percent ?? 100).toString()}%` }}
-            />
-          </div>
+          <ProgressBar value={percent === null ? null : percent / 100} label={t("update.progressLabel")} motion="duration-300 ease-out" />
           <p className="mt-1.5 text-xs tabular-nums text-muted">
             {percent === null ? t("update.downloadingUnknown") : t("update.downloading", { percent })}
           </p>

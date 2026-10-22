@@ -20,7 +20,7 @@ export function RiskIndicator() {
       onClick={() => {
         navigate("profile");
       }}
-      className="rounded-md outline-offset-2"
+      className="hit-40 rounded-md outline-offset-2 transition-[scale] duration-150 ease-out active:scale-[0.96]"
     >
       <Badge tone={low ? "success" : "danger"}>
         {low ? t("quests.risk.low") : `${t("quests.risk.ban")} · ${t("quests.risk.hint", { count: data.writes })}`}

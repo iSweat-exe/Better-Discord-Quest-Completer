@@ -18,6 +18,12 @@ import { useNow } from "@/lib/use-now";
 import { ActivityHistory, WeeklyOrbs } from "./profile-sections";
 import { useAppStats } from "./queries";
 
+/*
+ * Figures sit in one panel per group, separated by hairlines (the grid's 1px gap shows the
+ * panel's background): a row of loose identical cards would add chrome, not information.
+ * Each group holds a multiple of three figures so no empty cell shows the hairline color.
+ */
+
 /** Shown while a figure is not known (loading, or Discord did not answer). */
 const UNKNOWN = "–";
 
@@ -30,7 +36,7 @@ interface StatProps {
 
 function Stat({ label, value, hint, icon }: StatProps) {
   return (
-    <div className="rounded-card bg-surface p-4 shadow-card">
+    <div className="bg-surface p-4">
       <div className="flex items-center gap-2 text-[13px] text-muted [&_svg]:size-4 [&_svg]:shrink-0">
         {icon}
         {label}
@@ -45,7 +51,7 @@ function Stat({ label, value, hint, icon }: StatProps) {
 function Group({ title, delay, children }: { title: string; delay: number; children: ReactNode }) {
   return (
     <section className="animate-fade-up" style={{ animationDelay: `${(delay * 60).toString()}ms` }}>
-      <h2 className="px-1 pb-2 text-xs font-semibold uppercase tracking-wider text-subtle">{title}</h2>
+      <h2 className="px-1 pb-2 text-[13px] font-semibold text-subtle">{title}</h2>
       {children}
     </section>
   );
@@ -87,7 +93,7 @@ function ProfileStats() {
   return (
     <>
       <Group title={t("profile.orbs")} delay={0}>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 gap-px overflow-hidden rounded-card bg-line shadow-card">
           <Stat icon={orbIcon} label={t("profile.orbs.balance")} value={count(balance.data)} />
           <Stat
             icon={orbIcon}
@@ -105,7 +111,7 @@ function ProfileStats() {
       </Group>
 
       <Group title={t("profile.quests")} delay={1}>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 gap-px overflow-hidden rounded-card bg-line shadow-card">
           <Stat label={t("profile.quests.completed")} value={count(stats?.completed)} />
           <Stat
             label={t("profile.quests.viaApp")}
@@ -121,7 +127,7 @@ function ProfileStats() {
       </Group>
 
       <Group title={t("profile.activity")} delay={2}>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 gap-px overflow-hidden rounded-card bg-line shadow-card">
           <Stat icon={<ClockIcon />} label={t("profile.activity.playtime")} value={formatDuration(playtime)} />
           <Stat icon={<Gamepad2Icon />} label={t("profile.activity.games")} value={formatNumber(library.length, locale)} />
           <Stat

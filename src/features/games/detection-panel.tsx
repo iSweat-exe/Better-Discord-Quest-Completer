@@ -47,7 +47,7 @@ function ResultMessage({ report, session }: { report: DetectionReport; session: 
   const { tone, text } = message[report.state];
 
   return (
-    <p
+    <div
       role="status"
       className={cn(
         "mt-3 flex items-start gap-2.5 rounded-lg px-3 py-2.5 text-[13px]",
@@ -58,7 +58,80 @@ function ResultMessage({ report, session }: { report: DetectionReport; session: 
     >
       <span className="mt-0.5 shrink-0 [&_svg]:size-4">{TONE_ICON[tone]}</span>
       {text}
-    </p>
+    </div>
+  );
+}
+
+type DiscordStatus = ReturnType<typeof useDiscordStatus>["data"];
+
+/** The three things that must be true for Discord to see a game. */
+function CheckList({
+  session,
+  discord,
+  windowMode,
+}: {
+  session: SessionInfo;
+  discord: DiscordStatus;
+  windowMode: "normal" | "minimized" | "hidden";
+}) {
+  const { t } = useT();
+  const discordOk = discord?.running === true;
+
+  return (
+    <ul className="space-y-2">
+      <StatusRow
+        tone={discord === undefined ? "neutral" : discordOk ? "ok" : "warn"}
+        label={t("detect.discord")}
+        detail={
+          discordOk
+            ? t("detect.discordOk", { client: discord.client ?? "Discord" })
+            : discord === undefined
+              ? t("common.loading")
+              : t("detect.discordKo")
+        }
+      />
+      <StatusRow tone="ok" label={t("detect.process")} detail={t("detect.processOk", { pid: session.pid })} />
+      <StatusRow
+        tone={windowMode === "normal" ? "ok" : "neutral"}
+        label={t("settings.runnerWindow")}
+        detail={t(`detect.window.${windowMode}` satisfies MessageKey)}
+      />
+    </ul>
+  );
+}
+
+/**
+ * Once Discord has seen the game, the checks have done their job: the panel shrinks to the
+ * one line that matters, and the checks stay one click away.
+ */
+function SettledDetection({
+  session,
+  discord,
+  windowMode,
+}: {
+  session: SessionInfo;
+  discord: DiscordStatus;
+  windowMode: "normal" | "minimized" | "hidden";
+}) {
+  const { t, locale } = useT();
+  const detectedAt = session.detectedAt ?? session.startedAt;
+  const seconds = Math.max(0, Math.round((detectedAt - session.startedAt) / 1000));
+
+  return (
+    <details className="group rounded-inner bg-sunken px-4 py-3 text-[13px]">
+      <summary className="flex cursor-pointer list-none select-none items-center gap-2.5 rounded-lg text-success">
+        <span className="shrink-0 [&_svg]:size-4">{TONE_ICON.ok}</span>
+        <span className="min-w-0 flex-1">
+          {t("detect.auto.detected", { time: formatTime(detectedAt, locale), seconds })}
+        </span>
+        <span className="shrink-0 text-muted">
+          <DisclosureChevron />
+        </span>
+      </summary>
+      <div className="mt-3">
+        <CheckList session={session} discord={discord} windowMode={windowMode} />
+      </div>
+    </details>
   );
 }
 
@@ -74,19 +147,19 @@ function AutomaticStatus({ session }: { session: SessionInfo }) {
   if (session.detection === "detected" && session.detectedAt !== null) {
     const seconds = Math.max(0, Math.round((session.detectedAt - session.startedAt) / 1000));
     return (
-      <p role="status" className="mt-4 flex items-start gap-2.5 rounded-lg bg-success-soft px-3 py-2.5 text-[13px] text-success">
+      <div role="status" className="mt-4 flex items-start gap-2.5 rounded-lg bg-success-soft px-3 py-2.5 text-[13px] text-success">
         <span className="mt-0.5 shrink-0 [&_svg]:size-4">{TONE_ICON.ok}</span>
         {t("detect.auto.detected", { time: formatTime(session.detectedAt, locale), seconds })}
-      </p>
+      </div>
     );
   }
 
   if (session.detection === "unverifiable") {
     return (
-      <p role="status" className="mt-4 flex items-start gap-2.5 rounded-lg bg-warning-soft px-3 py-2.5 text-[13px] text-warning">
+      <div role="status" className="mt-4 flex items-start gap-2.5 rounded-lg bg-warning-soft px-3 py-2.5 text-[13px] text-warning">
         <span className="mt-0.5 shrink-0 [&_svg]:size-4">{TONE_ICON.warn}</span>
         {t("detect.result.unavailable")}
-      </p>
+      </div>
     );
   }
 
@@ -122,8 +195,11 @@ export function DetectionPanel({ session }: { session: SessionInfo }) {
     };
   }, [automatic, watching, detected, checking, runCheck, session.id]);
 
-  const discordOk = discord?.running === true;
   const windowMode = settings?.runnerWindow ?? "normal";
+
+  if (session.detection === "detected" && session.detectedAt !== null) {
+    return <SettledDetection session={session} discord={discord} windowMode={windowMode} />;
+  }
 
   return (
     <section aria-labelledby="detect-heading" className="rounded-inner bg-sunken p-4">
@@ -132,25 +208,7 @@ export function DetectionPanel({ session }: { session: SessionInfo }) {
       </h3>
       <p className="mb-3 mt-0.5 text-[13px] text-muted">{t("detect.subtitle")}</p>
 
-      <ul className="space-y-2">
-        <StatusRow
-          tone={discord === undefined ? "neutral" : discordOk ? "ok" : "warn"}
-          label={t("detect.discord")}
-          detail={
-            discordOk
-              ? t("detect.discordOk", { client: discord.client ?? "Discord" })
-              : discord === undefined
-                ? t("common.loading")
-                : t("detect.discordKo")
-          }
-        />
-        <StatusRow tone="ok" label={t("detect.process")} detail={t("detect.processOk", { pid: session.pid })} />
-        <StatusRow
-          tone={windowMode === "normal" ? "ok" : "neutral"}
-          label={t("settings.runnerWindow")}
-          detail={t(`detect.window.${windowMode}` satisfies MessageKey)}
-        />
-      </ul>
+      <CheckList session={session} discord={discord} windowMode={windowMode} />
 
       {automatic ? <AutomaticStatus session={session} /> : null}
 

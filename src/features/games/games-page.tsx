@@ -1,4 +1,4 @@
-import { Gamepad2Icon, SearchIcon } from "@/components/icons";
+import { SearchIcon } from "@/components/icons";
 
 import { Button } from "@/components/ui/button";
 import { EmptyState, Kbd } from "@/components/ui/primitives";
@@ -49,7 +49,6 @@ function Welcome() {
     <div className="col-span-full grid place-items-center overflow-y-auto rounded-card bg-surface shadow-card">
       <div className="flex w-full max-w-md flex-col items-center py-8">
         <EmptyState
-          icon={<Gamepad2Icon />}
           title={t("games.empty.title")}
           action={
             <Button
@@ -66,12 +65,9 @@ function Welcome() {
           {t("games.empty.body")}
         </EmptyState>
 
-        <ol className="mt-2 grid w-full gap-2 px-6">
-          {steps.map((step, index) => (
-            <li key={step} className="flex items-center gap-3 rounded-inner bg-raised px-4 py-3 text-sm">
-              <span className="grid size-6 place-items-center rounded-full bg-accent-soft text-xs font-semibold tabular-nums text-accent-text">
-                {index + 1}
-              </span>
+        <ol className="mt-4 w-full max-w-sm list-decimal space-y-1.5 pl-5 text-sm text-muted marker:tabular-nums marker:text-subtle">
+          {steps.map((step) => (
+            <li key={step} className="pl-1">
               {t(step)}
             </li>
           ))}

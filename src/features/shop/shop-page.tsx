@@ -46,7 +46,7 @@ function ProductCard({ product, balance }: { product: ShopProduct; balance: numb
     <li className="group flex flex-col overflow-hidden rounded-card bg-surface shadow-card transition-transform duration-200 ease-out hover:-translate-y-0.5 motion-reduce:transition-none motion-reduce:hover:translate-y-0">
       {/* A fixed square stage: tall effects and wide nameplates are contained, never stretch the card. */}
       <div
-        className="relative aspect-square overflow-hidden bg-sunken bg-[radial-gradient(circle_at_50%_45%,var(--accent-soft),transparent_72%)]"
+        className="relative aspect-square overflow-hidden bg-sunken"
         // Without an image, Discord's own colors for the item carry the card.
         style={
           product.imageUrl === null && product.colors.length > 0
@@ -68,7 +68,7 @@ function ProductCard({ product, balance }: { product: ShopProduct; balance: numb
           />
         ) : (
           <div className="absolute inset-0 grid place-items-center">
-            <OrbIcon className="size-14 drop-shadow-lg" />
+            <OrbIcon className="size-14" />
           </div>
         )}
         <div className="absolute left-2 top-2 flex flex-wrap gap-1">

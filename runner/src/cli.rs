@@ -1,6 +1,7 @@
 //! Analyse des arguments de ligne de commande du runner.
 
 use std::ffi::OsString;
+use std::path::PathBuf;
 
 const DEFAULT_TITLE: &str = "Discord Quest Completer";
 
@@ -28,6 +29,8 @@ pub struct Options {
     pub title: String,
     pub lang: Lang,
     pub window: WindowMode,
+    /// `.ico` file of the game's icon (one image per size), used for the taskbar button and the tray icon.
+    pub icon: Option<PathBuf>,
 }
 
 impl Default for Options {
@@ -36,6 +39,7 @@ impl Default for Options {
             title: DEFAULT_TITLE.to_owned(),
             lang: Lang::default(),
             window: WindowMode::default(),
+            icon: None,
         }
     }
 }
@@ -72,6 +76,11 @@ impl Options {
                             Some(mode) if mode.eq_ignore_ascii_case("hidden") => WindowMode::Hidden,
                             _ => WindowMode::Normal,
                         };
+                    }
+                }
+                Some("--icon") => {
+                    if let Some(value) = args.next() {
+                        options.icon = Some(PathBuf::from(value));
                     }
                 }
                 // Legacy spelling of `--window hidden`.
@@ -130,6 +139,13 @@ mod tests {
     fn unknown_window_modes_fall_back_to_normal() {
         assert_eq!(parse(&["--window", "fullscreen"]).window, WindowMode::Normal);
         assert_eq!(parse(&["--window"]).window, WindowMode::Normal);
+    }
+
+    #[test]
+    fn icon_path_is_read_and_optional() {
+        assert_eq!(parse(&["--icon", "icons/game.ico"]).icon, Some(PathBuf::from("icons/game.ico")));
+        assert_eq!(parse(&["--icon"]).icon, None);
+        assert_eq!(parse(&[]).icon, None);
     }
 
     #[test]

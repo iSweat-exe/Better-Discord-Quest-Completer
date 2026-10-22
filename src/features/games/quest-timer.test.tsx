@@ -20,8 +20,9 @@ const session = (startedAgoSeconds: number, targetSeconds = 900): SessionInfo =>
 
 describe("QuestTimer", () => {
   it("shows the remaining time while the goal is not reached", () => {
-    render(<QuestTimer session={session(60)} />);
-    expect(screen.getByText(/left/)).toHaveTextContent("14:");
+    // Half a minute in: 14:30 remain, so a slow machine would need to lose 30 s to change the minute.
+    render(<QuestTimer session={session(30)} />);
+    expect(screen.getByRole("img", { name: /left/ })).toHaveTextContent("14:");
     expect(screen.getByText("Goal: 15 min")).toBeInTheDocument();
   });
 
@@ -35,15 +36,15 @@ describe("QuestTimer", () => {
   });
 
   it("counts from the detection, not from the launch", () => {
-    const detectedAgo = 60;
+    const detectedAgo = 30;
     render(
       <QuestTimer
         session={{ ...session(600), detection: "detected", detectedAt: Date.now() - detectedAgo * 1000 }}
       />,
     );
 
-    // 14 minutes remain: only the last minute counts, not the ten since the launch.
-    expect(screen.getByText(/left/)).toHaveTextContent("14:");
+    // 14:30 remain: only the last half minute counts, not the ten minutes since the launch.
+    expect(screen.getByRole("img", { name: /left/ })).toHaveTextContent("14:");
     expect(screen.getByText(/Detected by Discord at/)).toBeInTheDocument();
   });
 

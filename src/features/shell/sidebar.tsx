@@ -1,17 +1,20 @@
-import { ShoppingBag } from "lucide-react";
-import { Gamepad2Icon, RadioIcon, ScrollTextIcon, SettingsIcon, SquareIcon, TrophyIcon } from "@/components/icons";
+import { CircleStop, ShoppingBag } from "lucide-react";
+import { Gamepad2Icon, RadioIcon, ScrollTextIcon, SettingsIcon, TrophyIcon } from "@/components/icons";
 import type { ReactNode } from "react";
 
 import { usePrefetchQuests } from "@/features/quests/queries";
 import { useStopAllSessions } from "@/features/sessions/queries";
 import { useSessionStore } from "@/features/sessions/session-store";
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/primitives";
+import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
 import { useT } from "@/lib/i18n/use-t";
 import type { MessageKey } from "@/lib/i18n";
 
 import { UpdateCard } from "@/features/update/update-card";
 
+import { modifierLabel, shortcutDigit } from "./shortcuts";
 import { SidebarProfile } from "./sidebar-profile";
 import { useUiStore, type Page } from "./ui-store";
 
@@ -27,9 +30,9 @@ function NavItem({ page, icon, label }: { page: Page; icon: ReactNode; label: Me
   const { t } = useT();
   const active = useUiStore((state) => state.page === page);
   const navigate = useUiStore((state) => state.navigate);
-  const runningCount = useSessionStore((state) => state.sessions.length);
   const prefetchQuests = usePrefetchQuests();
   const prefetch = page === "quests" ? prefetchQuests : undefined;
+  const digit = shortcutDigit(page);
 
   return (
     <button
@@ -41,49 +44,58 @@ function NavItem({ page, icon, label }: { page: Page; icon: ReactNode; label: Me
         navigate(page);
       }}
       className={cn(
-        "flex h-10 w-full items-center gap-3 rounded-control px-3 text-left text-sm font-medium [&_svg]:size-[18px]",
+        "group flex h-10 w-full items-center gap-3 rounded-control px-3 text-left text-sm font-medium [&_svg]:size-[18px]",
         "transition-[background-color,color,box-shadow] duration-150 ease-out [&_svg]:transition-colors [&_svg]:duration-150",
         active ? "bg-surface text-fg shadow-card [&_svg]:text-accent-text" : "text-muted hover:bg-raised hover:text-fg",
       )}
     >
       {icon}
       <span className="flex-1 truncate">{t(label)}</span>
-      {page === "games" && runningCount > 0 ? (
-        <span className="grid h-5 min-w-5 place-items-center rounded-full bg-success-soft px-1.5 text-xs font-semibold tabular-nums text-success">
-          {runningCount}
-        </span>
+      {digit !== null ? (
+        // Shown when the entry is pointed at or focused: a hint, not a permanent label.
+        <Kbd
+          aria-hidden="true"
+          className="bg-transparent text-subtle opacity-0 shadow-none transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none"
+        >
+          {modifierLabel()} {digit}
+        </Kbd>
       ) : null}
     </button>
   );
 }
 
+/**
+ * What is running, in one line that keeps its place whether or not a game runs.
+ * Stopping everything is rare and a bit drastic, so it is an icon that turns red
+ * when reached for, not a red button that is always shouting.
+ */
 function RunningSummary() {
   const { t } = useT();
   const count = useSessionStore((state) => state.sessions.length);
   const stopAll = useStopAllSessions();
 
   if (count === 0) {
-    return <p className="px-3 pb-2 text-[13px] text-subtle">{t("nav.idle")}</p>;
+    return <p className="flex h-8 items-center px-3 text-[13px] text-subtle">{t("nav.idle")}</p>;
   }
 
   return (
-    <div className="mb-2 rounded-card bg-surface p-3 shadow-card">
-      <div className="flex items-center gap-2 text-[13px] font-medium">
-        <span className="size-2 rounded-full bg-success" aria-hidden="true" />
-        {t("nav.running", { count })}
-      </div>
-      <Button
-        variant="danger"
-        size="sm"
-        className="mt-2.5 w-full"
-        disabled={stopAll.isPending}
-        onClick={() => {
-          stopAll.mutate();
-        }}
-      >
-        <SquareIcon className="[&_svg]:fill-current" />
-        {t("nav.stopAll")}
-      </Button>
+    <div className="flex h-8 items-center gap-2 pl-3 text-[13px] font-medium">
+      <span className="size-2 shrink-0 animate-breathe rounded-full bg-success motion-reduce:animate-none" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate">{t("nav.running", { count })}</span>
+      <Tooltip content={t("nav.stopAll")} side="right">
+        <Button
+          variant="ghost"
+          size="iconSm"
+          aria-label={t("nav.stopAll")}
+          disabled={stopAll.isPending}
+          className="hover:bg-danger-soft hover:text-danger"
+          onClick={() => {
+            stopAll.mutate();
+          }}
+        >
+          <CircleStop aria-hidden="true" />
+        </Button>
+      </Tooltip>
     </div>
   );
 }

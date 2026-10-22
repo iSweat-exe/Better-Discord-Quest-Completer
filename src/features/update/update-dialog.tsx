@@ -38,7 +38,7 @@ export function UpdateDialog() {
     >
       <div className="space-y-4 px-6 pb-6 pt-4">
         <div>
-          <p className="mb-1.5 flex items-baseline justify-between text-xs font-semibold uppercase tracking-wider text-subtle">
+          <p className="mb-1.5 flex items-baseline justify-between text-[13px] font-semibold text-subtle">
             {t("update.notes")}
             {info.publishedAt !== null ? (
               <span className="font-normal normal-case tracking-normal">

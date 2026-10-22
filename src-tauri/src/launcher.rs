@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use crate::error::{AppError, AppResult};
 use crate::games::executable::ExecutablePath;
+use crate::games::icon;
 use crate::games::model::{CURRENT_PLATFORM, Game, is_valid_game_id};
 use crate::locale::Lang;
 use crate::process::runner;
@@ -72,7 +73,7 @@ pub async fn start_session(
     state.log.info(format!("{}: fake executable {installed:?} ({}).", game.name, path.file_name()));
 
     let settings = state.settings.get();
-    let args: Vec<OsString> = vec![
+    let mut args: Vec<OsString> = vec![
         "--title".into(),
         game.name.clone().into(),
         "--lang".into(),
@@ -80,6 +81,16 @@ pub async fn start_session(
         "--window".into(),
         settings.runner_window.argument().into(),
     ];
+
+    // The taskbar button shows the game, not this app. A game without an icon keeps the runner's.
+    match icon::ensure(&state.paths.root().join("game-icons"), &game).await {
+        Ok(Some(file)) => {
+            args.push("--icon".into());
+            args.push(file.into_os_string());
+        }
+        Ok(None) => {}
+        Err(error) => state.log.warn(format!("{}: could not get the game icon: {error}", game.name)),
+    }
 
     let minutes = target_minutes
         .map_or(settings.quest_duration_minutes, |requested| requested.clamp(MIN_QUEST_MINUTES, MAX_QUEST_MINUTES));

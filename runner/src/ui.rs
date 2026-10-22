@@ -6,6 +6,7 @@
 use std::ffi::c_void;
 use std::mem::{size_of, zeroed};
 use std::ptr::{null, null_mut};
+use std::sync::OnceLock;
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
@@ -25,7 +26,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     AdjustWindowRectEx, AppendMenuW, BS_PUSHBUTTON, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
     CW_USEDEFAULT, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
     DispatchMessageW, GWLP_USERDATA, GetCursorPos, GetMessageW, GetWindowLongPtrW, HICON,
-    IDC_ARROW, IDI_APPLICATION, IsDialogMessageW, IsWindowVisible, KillTimer, LoadCursorW,
+    GetSystemMetrics, IDC_ARROW, IDI_APPLICATION, IMAGE_ICON, IsDialogMessageW, LR_LOADFROMFILE, LoadImageW,
+    SM_CXICON, SM_CXSMICON, IsWindowVisible, KillTimer, LoadCursorW,
     LoadIconW, MF_SEPARATOR, MF_STRING, MSG, PostMessageW, PostQuitMessage, RegisterClassExW,
     RegisterWindowMessageW, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWMINNOACTIVE, SW_SHOWNOACTIVATE, SendMessageW,
     SetForegroundWindow, SetTimer, SetWindowLongPtrW, ShowWindow, TPM_RIGHTBUTTON, TrackPopupMenu,
@@ -48,6 +50,31 @@ const ID_MENU_QUIT: usize = 2002;
 
 /// Icon resource embedded by `runner.rc`.
 const ICON_RESOURCE_ID: usize = 1;
+
+/// The game's own icon (an `.ico` holding several sizes), when the app gave one:
+/// the taskbar then shows the game instead of this placeholder. Kept as the
+/// NUL-terminated wide path `LoadImageW` expects.
+static GAME_ICON: OnceLock<Vec<u16>> = OnceLock::new();
+const MAX_ICON_BYTES: u64 = 4 * 1024 * 1024;
+/// An icon file starts with these bytes (reserved = 0, type = 1).
+const ICO_HEADER: [u8; 4] = [0, 0, 1, 0];
+
+/// Remembers the icon file at `path`. Anything unusable is ignored: the runner
+/// must still start, with its own icon.
+fn remember_game_icon(path: &std::path::Path) {
+    use std::io::Read as _;
+    use std::os::windows::ffi::OsStrExt as _;
+
+    let usable = std::fs::metadata(path).is_ok_and(|meta| meta.len() <= MAX_ICON_BYTES);
+    let mut header = [0_u8; 4];
+    let is_icon = usable
+        && std::fs::File::open(path).and_then(|mut file| file.read_exact(&mut header)).is_ok()
+        && header == ICO_HEADER;
+    if is_icon {
+        let wide_path: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let _ = GAME_ICON.set(wide_path);
+    }
+}
 
 // Dimensions logiques (96 dpi) de la zone cliente.
 const CLIENT_WIDTH: i32 = 420;
@@ -152,11 +179,26 @@ fn make_int_resource(id: usize) -> *const u16 {
     id as *const u16
 }
 
+/// Loads the icon of the file at `path` in exactly `size` pixels: the file holds
+/// one image per size, so nothing is scaled at runtime.
+///
+/// # Safety
+/// `path` must be NUL-terminated. Must be called from the UI thread.
+unsafe fn icon_from_file(path: &[u16], size: i32) -> Option<HICON> {
+    // SAFETY: `path` is a valid NUL-terminated wide string for the whole call.
+    let icon = unsafe { LoadImageW(null_mut(), path.as_ptr(), IMAGE_ICON, size, size, LR_LOADFROMFILE) };
+    (!icon.is_null()).then_some(icon as HICON)
+}
+
 /// # Safety
 /// Must be called from the UI thread.
-unsafe fn load_app_icon() -> HICON {
+unsafe fn load_app_icon(small: bool) -> HICON {
     // SAFETY: the identifier is an embedded icon resource or, failing that, a system icon.
     unsafe {
+        let size = GetSystemMetrics(if small { SM_CXSMICON } else { SM_CXICON });
+        if let Some(icon) = GAME_ICON.get().and_then(|path| icon_from_file(path, size)) {
+            return icon;
+        }
         let module = GetModuleHandleW(null());
         let icon = LoadIconW(module, make_int_resource(ICON_RESOURCE_ID));
         if icon.is_null() {
@@ -214,7 +256,7 @@ unsafe fn tray_data(hwnd: HWND, state: &State) -> NOTIFYICONDATAW {
     data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     data.uCallbackMessage = WM_TRAY;
     // SAFETY: thread d'interface.
-    data.hIcon = unsafe { load_app_icon() };
+    data.hIcon = unsafe { load_app_icon(true) };
 
     // On garde la place du NUL final dans `szTip`.
     let capacity = data.szTip.len() - 1;
@@ -496,7 +538,11 @@ pub fn run(options: &Options) {
     unsafe {
         let module = GetModuleHandleW(null());
         let class_name = wide("DQCRunnerWindow");
-        let icon = load_app_icon();
+        if let Some(path) = &options.icon {
+            remember_game_icon(path);
+        }
+        let icon = load_app_icon(false);
+        let small_icon = load_app_icon(true);
 
         let class = WNDCLASSEXW {
             cbSize: size_of::<WNDCLASSEXW>() as u32,
@@ -510,7 +556,7 @@ pub fn run(options: &Options) {
             hbrBackground: null_mut(),
             lpszMenuName: null(),
             lpszClassName: class_name.as_ptr(),
-            hIconSm: icon,
+            hIconSm: small_icon,
         };
         if RegisterClassExW(&class) == 0 {
             return;

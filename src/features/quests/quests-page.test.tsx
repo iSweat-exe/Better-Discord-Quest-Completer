@@ -18,6 +18,8 @@ const api = vi.hoisted(() => ({
   startSession: vi.fn(),
   disconnectQuests: vi.fn(),
   enrollQuest: vi.fn(),
+  getQuestRisk: vi.fn(),
+  getInterruptedVideos: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof IpcModule>()),
@@ -103,6 +105,8 @@ function renderPage() {
 describe("QuestsPage", () => {
   beforeEach(() => {
     Object.values(api).forEach((mock) => mock.mockReset());
+    api.getQuestRisk.mockResolvedValue({ level: "low", score: 0, writes: 0 });
+    api.getInterruptedVideos.mockResolvedValue([]);
     useUiStore.setState({ searchOpen: false, searchSeed: "" });
     useSessionStore.setState({ sessions: [] });
   });
@@ -163,8 +167,9 @@ describe("QuestsPage", () => {
     renderPage();
 
     const card = (await screen.findByText("Watch the trailer", { selector: "h3" })).closest("li")!;
-    expect(within(card).getByText(/Accept it, then complete the video/)).toBeInTheDocument();
     expect(within(card).getByRole("button", { name: "Accept" })).toBeInTheDocument();
+    // The button says it all: the card does not repeat the banner's explanation.
+    expect(within(card).queryByText(/complete the video from here/)).not.toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: /Launch|Search/ })).not.toBeInTheDocument();
   });
 

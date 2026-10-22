@@ -8,6 +8,10 @@ interface ProgressRingProps {
   size?: number;
   strokeWidth?: number;
   complete?: boolean;
+  /** What the ring says, for assistive technology (its figure is drawn, not read). */
+  label?: string;
+  /** The arc takes the hue of the surrounding `--game-hue` instead of the accent. */
+  tinted?: boolean;
   children?: ReactNode;
   className?: string;
 }
@@ -17,6 +21,8 @@ export function ProgressRing({
   size = 88,
   strokeWidth = 7,
   complete = false,
+  label,
+  tinted = false,
   children,
   className,
 }: ProgressRingProps) {
@@ -25,7 +31,11 @@ export function ProgressRing({
   const clamped = Math.min(1, Math.max(0, value));
 
   return (
-    <div className={cn("relative shrink-0", className)} style={{ width: size, height: size }}>
+    <div
+      className={cn("relative shrink-0", className)}
+      style={{ width: size, height: size }}
+      {...(label ? { role: "img", "aria-label": label } : {})}
+    >
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90" aria-hidden="true">
         <circle
           cx={size / 2}
@@ -46,7 +56,7 @@ export function ProgressRing({
           strokeDashoffset={circumference * (1 - clamped)}
           className={cn(
             "transition-[stroke-dashoffset,stroke] duration-1000 ease-linear",
-            complete ? "stroke-success" : "stroke-accent-text",
+            complete ? "stroke-success" : tinted ? "game-tint-stroke" : "stroke-accent-text",
           )}
         />
       </svg>

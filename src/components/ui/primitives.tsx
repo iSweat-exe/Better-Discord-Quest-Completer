@@ -1,5 +1,6 @@
 import type { ComponentProps, ReactNode } from "react";
 
+import { AppMark } from "@/components/ui/app-mark";
 import { cn } from "@/lib/cn";
 
 export function Kbd({ className, ...props }: ComponentProps<"kbd">) {
@@ -55,7 +56,8 @@ export function Spinner({ className }: { className?: string }) {
 }
 
 interface EmptyStateProps {
-  icon: ReactNode;
+  /** Without one, the app's own mark is shown. */
+  icon?: ReactNode;
   title: string;
   children?: ReactNode;
   action?: ReactNode;
@@ -65,9 +67,13 @@ interface EmptyStateProps {
 export function EmptyState({ icon, title, children, action, className }: EmptyStateProps) {
   return (
     <div className={cn("flex flex-col items-center px-6 py-10 text-center", className)}>
-      <div className="mb-4 grid size-12 place-items-center rounded-2xl bg-accent-soft text-accent-text [&_svg]:size-6">
-        {icon}
-      </div>
+      {icon === undefined ? (
+        <AppMark className="mb-4" />
+      ) : (
+        <div className="mb-4 grid size-12 place-items-center rounded-2xl bg-accent-soft text-accent-text [&_svg]:size-6">
+          {icon}
+        </div>
+      )}
       <h2 className="text-base font-semibold tracking-tight">{title}</h2>
       {children ? <p className="mt-1.5 max-w-sm text-sm text-muted">{children}</p> : null}
       {action ? <div className="mt-5">{action}</div> : null}
@@ -92,7 +98,7 @@ export function Section({
 }) {
   return (
     <section className={cn("animate-fade-up", className)} style={{ animationDelay: `${(delay * 60).toString()}ms` }}>
-      <h2 className="px-1 pb-2 text-xs font-semibold uppercase tracking-wider text-subtle">{title}</h2>
+      <h2 className="px-1 pb-2 text-[13px] font-semibold text-subtle">{title}</h2>
       {description ? <p className="px-1 pb-2 text-sm text-muted">{description}</p> : null}
       {/* Rows inside use 6px of padding and a 10px radius: 16 = 10 + 6. */}
       <div className="rounded-card bg-surface p-1.5 shadow-card">{children}</div>

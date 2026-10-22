@@ -90,3 +90,13 @@ export function formatRelativeTime(timestamp: number, now: number, locale?: stri
 export function formatTime(timestamp: number, locale?: string): string {
   return clockFormatter(locale).format(timestamp);
 }
+
+/**
+ * The letter that stands for a name: its first letter or digit, upper-cased.
+ * Decorations and emoji at the start ("✿ Cypr3s") are skipped, and a name without
+ * any letter gives `?`.
+ */
+export function initialOf(name: string): string {
+  const first = /[\p{L}\p{N}]/u.exec(name);
+  return first ? first[0].toUpperCase() : "?";
+}
