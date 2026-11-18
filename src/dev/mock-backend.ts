@@ -9,16 +9,23 @@ import { emit } from "@tauri-apps/api/event";
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 
 import { EVENTS } from "@/lib/events";
+import { MAX_PLAYING } from "@/lib/queue";
 import type {
+  AccountDetails,
+  Guild,
+  ProfileEdit,
   Catalog,
   Executable,
   Game,
   LibraryEntry,
   LogEntry,
   LogLevel,
+  DiagnosticCheck,
   PresenceStatus,
   SessionInfo,
   QuestsResponse,
+  QueueItem,
+  QueueStatus,
   Settings,
   Support,
   UpdateInfo,
@@ -57,7 +64,50 @@ interface MockArgs {
   token: string;
   patch: Partial<Settings>;
   request: { gameId: string };
+  targetMinutes: number | null;
+  items: QueueItem[];
+  questId: string;
+  edit: ProfileEdit;
+  guildId: string;
 }
+
+let mockAccount: AccountDetails = {
+  id: "80351110224678912",
+  username: "nelly",
+  displayName: "Nelly",
+  avatar: null,
+  banner: null,
+  accentColor: null,
+  bio: "Je joue à tout, sauf aux jeux de cartes.",
+  pronouns: "elle",
+  premium: "nitro",
+  createdAt: 1_439_227_597_529,
+  mfaEnabled: true,
+  verified: true,
+  badges: [
+    { id: "premium", description: "Abonné depuis le 12 mars 2020" },
+    { id: "quest_completed", description: "A terminé une quête" },
+  ],
+};
+
+let mockGuilds: Guild[] = [
+  { id: "1001", name: "Café des joueurs", icon: null, owner: false, memberCount: 18_420 },
+  { id: "1002", name: "Les copains", icon: null, owner: true, memberCount: 12 },
+  { id: "1003", name: "Speedrun FR", icon: null, owner: false, memberCount: 3_210 },
+];
+
+const DEMO_DIAGNOSTICS: DiagnosticCheck[] = [
+  { id: "app", status: "info", detail: "dev · browser", at: null },
+  { id: "dataDir", status: "ok", detail: "%USERPROFILE%\\AppData\\Local\\dev.questcompleter.app", at: null },
+  { id: "runner", status: "ok", detail: null, at: null },
+  { id: "jobObject", status: "ok", detail: null, at: null },
+  { id: "discordClient", status: "ok", detail: "Discord", at: null },
+  { id: "discordLog", status: "ok", detail: null, at: Date.now() - 60_000 },
+  { id: "primaryGame", status: "info", detail: null, at: null },
+  { id: "catalog", status: "warning", detail: "10000", at: null },
+  { id: "token", status: "info", detail: null, at: null },
+  { id: "autostart", status: "ok", detail: "false", at: null },
+];
 
 function supportOf(executable: { name: string; os: string }): Support {
   if (executable.os !== PLATFORM) return "otherPlatform";
@@ -145,9 +195,13 @@ export function installMockBackend(): void {
     runnerWindow: "normal",
     autoStopOnComplete: false,
     launchAtStartup: false,
+    autoPlayAccepted: false,
+    autoResume: false,
+    notifyOnDetection: true,
   });
   let library = load<LibraryEntry[]>("library", []);
   let sessions: SessionInfo[] = [];
+  let queue: QueueStatus = { playing: [], pending: [], done: [] };
   let questsConnected = load<boolean>("quests", false);
   let presence: PresenceStatus = { connected: false, gameId: null, gameName: null };
   let catalog: Promise<Catalog> | undefined;
@@ -179,6 +233,92 @@ export function installMockBackend(): void {
     const game = library.find((entry) => entry.game.id === gameId)?.game ?? (await loadCatalog()).games.find((item) => item.id === gameId);
     if (!game) throw new MockError("gameNotFound", `game ${gameId} was not found`);
     return game;
+  };
+
+  const startSession = async (gameId: string, executableName: string, targetMinutes: number | null) => {
+    const game = await findGame(gameId);
+    const executable = game.executables.find((item) => item.name === executableName);
+    if (executable?.support !== "ok") throw new MockError("executableUnavailable", "executable unavailable");
+
+    const id = `${game.id}:${executable.name.toLowerCase()}`;
+    if (sessions.some((session) => session.id === id)) throw new MockError("alreadyRunning", "already running");
+
+    const session: SessionInfo = {
+      id,
+      gameId: game.id,
+      gameName: game.name,
+      executable: executable.name,
+      path: `C:/Users/you/AppData/Local/dev.questcompleter.app/games/${game.id}/${executable.name}`,
+      pid: 1000 + Math.floor(Math.random() * 9000),
+      startedAt: Date.now(),
+      targetSeconds: (targetMinutes ?? settings.questDurationMinutes) * 60,
+      detection: settings.waitForDetection ? "waiting" : "off",
+      detectedAt: null,
+    };
+    sessions = [...sessions, session];
+    if (session.detection === "waiting") {
+      // Discord notices the game a little while after the launch.
+      window.setTimeout(() => {
+        sessions = sessions.map((item) =>
+          item.id === session.id ? { ...item, detection: "detected", detectedAt: Date.now() } : item,
+        );
+        const detected = sessions.find((item) => item.id === session.id);
+        if (detected) void emit(EVENTS.sessionDetected, detected);
+        void broadcast();
+      }, 15_000);
+    }
+    timers.set(
+      id,
+      window.setTimeout(() => {
+        void emit(EVENTS.sessionCompleted, session);
+      }, session.targetSeconds * 1000),
+    );
+    log("info", `${game.name} started as ${executable.name} (pid ${session.pid}).`);
+    await broadcast();
+    return session;
+  };
+
+  const stopSession = async (sessionId: string) => {
+    window.clearTimeout(timers.get(sessionId));
+    sessions = sessions.filter((item) => item.id !== sessionId);
+    await broadcast();
+  };
+
+  /** Starts every waiting quest of the queue while slots are free: their games run together. */
+  const advanceQueue = async (): Promise<void> => {
+    const [item, ...rest] = queue.pending;
+    if (!item || queue.playing.length >= MAX_PLAYING) {
+      await emit(EVENTS.queueChanged, queue);
+      return;
+    }
+    queue = { ...queue, playing: [...queue.playing, { item, sessionId: null, startedAt: Date.now() }], pending: rest };
+    await emit(EVENTS.queueChanged, queue);
+    try {
+      const session = await startSession(item.gameId, item.executable, item.minutes);
+      queue = {
+        ...queue,
+        playing: queue.playing.map((playing) => (playing.item.questId === item.questId ? { ...playing, sessionId: session.id } : playing)),
+      };
+    } catch (error) {
+      queue = {
+        ...queue,
+        playing: queue.playing.filter((playing) => playing.item.questId !== item.questId),
+        done: [{ item, outcome: "failed", message: String(error), at: Date.now() }, ...queue.done],
+      };
+    }
+    await advanceQueue();
+  };
+
+  const finishQueueItem = async (questId: string, outcome: "completed" | "skipped") => {
+    const playing = queue.playing.find((candidate) => candidate.item.questId === questId);
+    if (!playing) return;
+    queue = {
+      ...queue,
+      playing: queue.playing.filter((candidate) => candidate !== playing),
+      done: [{ item: playing.item, outcome, message: null, at: Date.now() }, ...queue.done],
+    };
+    if (playing.sessionId) await stopSession(playing.sessionId);
+    await advanceQueue();
   };
 
   mockIPC(
@@ -225,54 +365,60 @@ export function installMockBackend(): void {
         case "list_sessions":
           return sessions;
 
-        case "start_session": {
-          const game = await findGame(args.gameId);
-          const executable = game.executables.find((item) => item.name === args.executable);
-          if (executable?.support !== "ok") throw new MockError("executableUnavailable", "executable unavailable");
+        case "start_session":
+          return startSession(args.gameId, args.executable, args.targetMinutes);
 
-          const id = `${game.id}:${executable.name.toLowerCase()}`;
-          if (sessions.some((session) => session.id === id)) throw new MockError("alreadyRunning", "already running");
+        case "get_queue":
+          return queue;
 
-          const session: SessionInfo = {
-            id,
-            gameId: game.id,
-            gameName: game.name,
-            executable: executable.name,
-            path: `C:\\Users\\you\\AppData\\Local\\dev.questcompleter.app\\games\\${game.id}\\${executable.name}`,
-            pid: 1000 + Math.floor(Math.random() * 9000),
-            startedAt: Date.now(),
-            targetSeconds: settings.questDurationMinutes * 60,
-            detection: settings.waitForDetection ? "waiting" : "off",
-            detectedAt: null,
-          };
-          sessions = [...sessions, session];
-          if (session.detection === "waiting") {
-            // Discord notices the game a little while after the launch.
-            window.setTimeout(() => {
-              sessions = sessions.map((item) =>
-                item.id === session.id ? { ...item, detection: "detected", detectedAt: Date.now() } : item,
-              );
-              void broadcast();
-            }, 15_000);
-          }
-          timers.set(
-            id,
-            window.setTimeout(() => {
-              void emit(EVENTS.sessionCompleted, session);
-            }, session.targetSeconds * 1000),
-          );
-          log("info", `${game.name} started as ${executable.name} (pid ${session.pid}).`);
-          await broadcast();
-          return session;
+        case "enqueue_quests": {
+          const queued = new Set([...queue.pending, ...queue.playing.map((playing) => playing.item)].map((item) => item.questId));
+          queue = { ...queue, pending: [...queue.pending, ...args.items.filter((item) => !queued.has(item.questId))] };
+          await advanceQueue();
+          return queue;
         }
+
+        case "skip_queue_item":
+          await finishQueueItem(args.questId, "skipped");
+          return null;
+
+        case "stop_queue": {
+          const playing = queue.playing;
+          queue = { playing: [], pending: [], done: [] };
+          for (const item of playing) if (item.sessionId) await stopSession(item.sessionId);
+          await emit(EVENTS.queueChanged, queue);
+          return null;
+        }
+
+        case "remove_from_queue":
+          queue = { ...queue, pending: queue.pending.filter((item) => item.questId !== args.questId) };
+          await emit(EVENTS.queueChanged, queue);
+          return null;
+
+        case "get_interrupted_run":
+          return null;
+        case "resume_interrupted_run":
+          return 0;
+        case "dismiss_interrupted_run":
+          return null;
+
+        case "get_primary_game": {
+          const shown = sessions.find((session) => session.detection === "detected");
+          return shown ? { name: shown.gameName, exePath: shown.path.toLowerCase(), at: shown.detectedAt ?? Date.now(), ours: true } : null;
+        }
+
+        case "run_diagnostics":
+          await new Promise((resolve) => window.setTimeout(resolve, 600));
+          return DEMO_DIAGNOSTICS;
 
         case "stop_session": {
           const session = sessions.find((item) => item.id === args.sessionId);
           if (!session) throw new MockError("sessionNotFound", "session does not exist");
-          window.clearTimeout(timers.get(session.id));
-          sessions = sessions.filter((item) => item.id !== session.id);
           log("info", `${session.gameName} stopped.`);
-          await broadcast();
+          // A game of the queue stopped by hand: its quest leaves the queue.
+          const queued = queue.playing.find((playing) => playing.sessionId === session.id);
+          if (queued) await finishQueueItem(queued.item.questId, "skipped");
+          else await stopSession(session.id);
           return null;
         }
 
@@ -281,6 +427,8 @@ export function installMockBackend(): void {
             window.clearTimeout(timer);
           });
           sessions = [];
+          queue = { playing: [], pending: [], done: [] };
+          await emit(EVENTS.queueChanged, queue);
           await broadcast();
           return null;
 
@@ -339,6 +487,28 @@ export function installMockBackend(): void {
         case "get_profile":
           if (!questsConnected) throw new MockError("tokenMissing", "no token");
           return { id: "80351110224678912", displayName: "Nelly", username: "nelly", avatar: null };
+
+        case "get_account":
+          if (!questsConnected) throw new MockError("tokenMissing", "no token");
+          return mockAccount;
+
+        case "get_guilds":
+          if (!questsConnected) throw new MockError("tokenMissing", "no token");
+          return mockGuilds;
+
+        case "edit_profile": {
+          if (!questsConnected) throw new MockError("tokenMissing", "no token");
+          const edit = args.edit;
+          if (edit.displayName !== undefined) mockAccount = { ...mockAccount, displayName: edit.displayName.trim() || null };
+          if (edit.bio !== undefined) mockAccount = { ...mockAccount, bio: edit.bio.trim() };
+          if (edit.pronouns !== undefined) mockAccount = { ...mockAccount, pronouns: edit.pronouns.trim() };
+          return mockAccount;
+        }
+
+        case "leave_guild":
+          if (!questsConnected) throw new MockError("tokenMissing", "no token");
+          mockGuilds = mockGuilds.filter((guild) => guild.id !== args.guildId);
+          return undefined;
 
         case "get_orbs_balance":
           if (!questsConnected) throw new MockError("tokenMissing", "no token");

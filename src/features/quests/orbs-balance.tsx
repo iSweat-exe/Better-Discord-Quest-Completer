@@ -1,6 +1,7 @@
 import { OrbIcon } from "@/components/ui/orb-icon";
 import { formatNumber } from "@/lib/format";
 import { useT } from "@/lib/i18n/use-t";
+import { formatOrbsValue } from "@/lib/orbs";
 
 import { useOrbsBalance } from "./queries";
 
@@ -15,11 +16,12 @@ export function OrbsBalance() {
   return (
     <p
       className="flex h-8 items-center gap-1.5 rounded-full bg-sunken px-3 text-sm font-medium tabular-nums"
-      title={t("quests.orbs")}
+      title={`${t("quests.orbs")} · ${t("orbs.valueHint")}`}
     >
       <OrbIcon key={balance} className="size-[18px] shrink-0 animate-orb-pop" />
       <span className="sr-only">{t("quests.orbs")}: </span>
       {formatted}
+      <span className="text-xs font-normal text-muted">{formatOrbsValue(balance, locale)}</span>
     </p>
   );
 }

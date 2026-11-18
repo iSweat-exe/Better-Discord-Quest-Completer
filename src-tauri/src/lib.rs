@@ -7,6 +7,7 @@
 //! * [`commands`]: the Tauri commands exposed to the frontend.
 
 mod commands;
+mod diagnostics;
 mod disk;
 mod discord;
 mod error;
@@ -21,6 +22,8 @@ mod presence;
 mod process;
 mod quest_watch;
 mod quests;
+mod queue;
+mod resume;
 mod settings;
 mod state;
 mod stats;
@@ -57,6 +60,7 @@ pub fn run() {
             quest_watch::spawn(app.handle().clone());
             updates::spawn_checker(app.handle().clone());
             lifecycle::spawn_show_fallback(app.handle().clone());
+            lifecycle::spawn_auto_resume(app.handle().clone());
             Ok(())
         })
         .on_window_event(lifecycle::on_window_event)
@@ -74,6 +78,16 @@ pub fn run() {
             commands::start_session,
             commands::stop_session,
             commands::stop_all_sessions,
+            commands::get_queue,
+            commands::enqueue_quests,
+            commands::skip_queue_item,
+            commands::stop_queue,
+            commands::remove_from_queue,
+            commands::get_interrupted_run,
+            commands::resume_interrupted_run,
+            commands::dismiss_interrupted_run,
+            commands::get_primary_game,
+            commands::run_diagnostics,
             commands::get_quests_connection,
             commands::connect_quests,
             commands::check_for_update,
@@ -91,6 +105,10 @@ pub fn run() {
             commands::dismiss_interrupted_videos,
             commands::get_app_stats,
             commands::get_profile,
+            commands::get_account,
+            commands::get_guilds,
+            commands::edit_profile,
+            commands::leave_guild,
             commands::get_orbs_balance,
             commands::get_orbs_shop,
             commands::disconnect_quests,

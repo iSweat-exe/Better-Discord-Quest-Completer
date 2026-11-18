@@ -101,7 +101,7 @@ export default function LogsPage() {
                 </time>
                 <span className={cn("mt-0.5 [&_svg]:size-4", LEVEL_STYLES[entry.level].className)}>
                   {LEVEL_STYLES[entry.level].icon}
-                  <span className="sr-only">{entry.level}</span>
+                  <span className="sr-only">{t(`logs.level.${entry.level}`)}</span>
                 </span>
                 <span className="min-w-0 break-words text-[13px] leading-5">{entry.message}</span>
               </li>

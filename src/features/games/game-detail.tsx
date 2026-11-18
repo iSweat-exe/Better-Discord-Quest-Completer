@@ -13,7 +13,7 @@ import { useUiStore } from "@/features/shell/ui-store";
 import { formatDuration, formatRelativeTime } from "@/lib/format";
 import { useT } from "@/lib/i18n/use-t";
 import { useFlash } from "@/lib/use-flash";
-import { useNow } from "@/lib/use-now";
+import { useMinute } from "@/lib/use-now";
 import type { LibraryEntry } from "@/types/domain";
 
 import { DetectionPanel } from "./detection-panel";
@@ -24,7 +24,7 @@ import { useGameHue } from "./use-game-hue";
 
 function PlaytimeLine({ entry }: { entry: LibraryEntry }) {
   const { t, locale } = useT();
-  const now = useNow();
+  const now = useMinute();
 
   const parts =
     entry.lastPlayedAt === null

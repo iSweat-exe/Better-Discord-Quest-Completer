@@ -1,11 +1,14 @@
-import { SearchIcon } from "@/components/icons";
+import { SearchIcon, TriangleAlertIcon } from "@/components/icons";
 
 import { Button } from "@/components/ui/button";
 import { EmptyState, Kbd } from "@/components/ui/primitives";
 import { SearchPalette } from "@/features/catalog/search-palette";
 import { DiscordChip } from "@/features/discord/discord-chip";
+import { PrimaryGameChip } from "@/features/discord/primary-game-chip";
 import { useCatalog } from "@/features/catalog/queries";
+import { modifierLabel } from "@/features/shell/shortcuts";
 import { useUiStore } from "@/features/shell/ui-store";
+import { errorMessage } from "@/lib/errors";
 import { sortLibrary } from "@/lib/library";
 import { useT } from "@/lib/i18n/use-t";
 
@@ -25,6 +28,7 @@ function SearchTrigger() {
   return (
     <button
       type="button"
+      data-tour="search"
       onClick={() => {
         setSearchOpen(true);
       }}
@@ -33,7 +37,7 @@ function SearchTrigger() {
       <SearchIcon size={18} className="shrink-0" />
       <span className="flex-1 truncate">{label}</span>
       <span className="flex items-center gap-1" aria-hidden="true">
-        <Kbd>Ctrl</Kbd>
+        <Kbd>{modifierLabel()}</Kbd>
         <Kbd>K</Kbd>
       </span>
     </button>
@@ -79,7 +83,8 @@ function Welcome() {
 
 export function GamesPage() {
   const { t } = useT();
-  const { data: entries = [], isPending } = useLibrary();
+  const library = useLibrary();
+  const { data: entries = [], isPending } = library;
   const selectedGameId = useUiStore((state) => state.selectedGameId);
   const selectGame = useUiStore((state) => state.selectGame);
 
@@ -94,12 +99,32 @@ export function GamesPage() {
           <div className="min-w-0 flex-1">
             <SearchTrigger />
           </div>
+          <PrimaryGameChip />
           <DiscordChip />
         </div>
       </header>
 
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(264px,340px)_minmax(0,1fr)] gap-5 px-8 pb-6">
-        {isPending ? null : selected ? (
+        {isPending ? null : library.isError ? (
+          // Not the welcome screen: the games are still saved, they just could not be read.
+          <div className="col-span-2 self-start rounded-card bg-surface shadow-card">
+            <EmptyState
+              icon={<TriangleAlertIcon />}
+              title={t("games.loadFailed")}
+              action={
+                <Button
+                  onClick={() => {
+                    void library.refetch();
+                  }}
+                >
+                  {t("common.retry")}
+                </Button>
+              }
+            >
+              {errorMessage(library.error, t)}
+            </EmptyState>
+          </div>
+        ) : selected ? (
           <>
             <LibraryList entries={entries} selectedId={selected.game.id} onSelect={selectGame} />
             <GameDetail key={selected.game.id} entry={selected} />

@@ -15,6 +15,7 @@ import { useImportLibrary } from "@/features/games/queries";
 import { cn } from "@/lib/cn";
 import { formatBytes } from "@/lib/format";
 import { useT } from "@/lib/i18n/use-t";
+import { useOnboardingStore } from "@/features/onboarding/onboarding-store";
 import { useCheckForUpdate } from "@/features/update/queries";
 import { useUpdateStore } from "@/features/update/update-store";
 import { AUTHOR_HANDLE, AUTHOR_URL } from "@/lib/links";
@@ -145,6 +146,32 @@ function QuestsSection() {
           }}
         />
       </SettingRow>
+      <SettingRow
+        title={t("settings.notifyOnDetection")}
+        hint={t("settings.notifyOnDetectionHint")}
+        htmlFor="setting-notify-detection"
+      >
+        <Switch
+          id="setting-notify-detection"
+          checked={settings.notifyOnDetection}
+          onCheckedChange={(notifyOnDetection) => {
+            update.mutate({ notifyOnDetection });
+          }}
+        />
+      </SettingRow>
+      <SettingRow
+        title={t("settings.autoPlayAccepted")}
+        hint={t("settings.autoPlayAcceptedHint")}
+        htmlFor="setting-auto-play"
+      >
+        <Switch
+          id="setting-auto-play"
+          checked={settings.autoPlayAccepted}
+          onCheckedChange={(autoPlayAccepted) => {
+            update.mutate({ autoPlayAccepted });
+          }}
+        />
+      </SettingRow>
     </Section>
   );
 }
@@ -190,6 +217,15 @@ function BehaviorSection() {
           checked={settings.launchAtStartup}
           onCheckedChange={(launchAtStartup) => {
             update.mutate({ launchAtStartup });
+          }}
+        />
+      </SettingRow>
+      <SettingRow title={t("settings.autoResume")} hint={t("settings.autoResumeHint")} htmlFor="setting-auto-resume">
+        <Switch
+          id="setting-auto-resume"
+          checked={settings.autoResume}
+          onCheckedChange={(autoResume) => {
+            update.mutate({ autoResume });
           }}
         />
       </SettingRow>
@@ -430,12 +466,52 @@ function UpdateRow() {
   );
 }
 
+/** Brings back the tour, the first steps and the tips, for whoever wants them again. */
+function HelpSection() {
+  const { t } = useT();
+  const startTour = useOnboardingStore((state) => state.startTour);
+  const showChecklist = useOnboardingStore((state) => state.showChecklist);
+  const resetTips = useOnboardingStore((state) => state.resetTips);
+
+  return (
+    <Section title={t("settings.help")} delay={4}>
+      <SettingRow title={t("settings.help.tour")} hint={t("settings.help.tourHint")}>
+        <Button size="sm" onClick={startTour}>
+          {t("settings.help.tourCta")}
+        </Button>
+      </SettingRow>
+      <SettingRow title={t("settings.help.checklist")} hint={t("settings.help.checklistHint")}>
+        <Button
+          size="sm"
+          onClick={() => {
+            showChecklist();
+            toast.success(t("settings.help.checklistShown"));
+          }}
+        >
+          {t("settings.help.checklistCta")}
+        </Button>
+      </SettingRow>
+      <SettingRow title={t("settings.help.tips")} hint={t("settings.help.tipsHint")}>
+        <Button
+          size="sm"
+          onClick={() => {
+            resetTips();
+            toast.success(t("settings.help.tipsReset"));
+          }}
+        >
+          {t("settings.help.tipsCta")}
+        </Button>
+      </SettingRow>
+    </Section>
+  );
+}
+
 function AboutSection() {
   const { t } = useT();
   const { data: info } = useAppInfo();
 
   return (
-    <Section title={t("settings.about")} delay={4}>
+    <Section title={t("settings.about")} delay={5}>
       <div className="flex items-center gap-4 px-3.5 py-3">
         <img src="/logo.png" alt="" width={44} height={44} draggable={false} />
         <div className="min-w-0 flex-1">
@@ -483,6 +559,7 @@ export default function SettingsPage() {
         <QuestsSection />
         <BehaviorSection />
         <DataSection />
+        <HelpSection />
         <AboutSection />
       </div>
     </div>

@@ -25,6 +25,9 @@ struct Memory {
     seen: BTreeSet<String>,
     /// Ids already reminded about their deadline.
     warned: BTreeSet<String>,
+    /// Ids of the quests seen accepted. `None` until the first look that records
+    /// them, which only sets the baseline (the field is newer than the file).
+    enrolled: Option<BTreeSet<String>>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -35,11 +38,13 @@ pub struct QuestChanges {
     pub completed: Vec<Quest>,
     /// Unfinished quests whose deadline is close, reported once each.
     pub expiring: Vec<Quest>,
+    /// Quests that were just accepted (in Discord or in the app), reported once each.
+    pub accepted: Vec<Quest>,
 }
 
 impl QuestChanges {
     pub fn is_empty(&self) -> bool {
-        self.new.is_empty() && self.completed.is_empty() && self.expiring.is_empty()
+        self.new.is_empty() && self.completed.is_empty() && self.expiring.is_empty() && self.accepted.is_empty()
     }
 }
 
@@ -65,6 +70,9 @@ impl QuestTracker {
         let memory = self.memory.get_or_insert_with(Memory::default);
         let mut changes = QuestChanges::default();
         self.dirty |= baseline;
+        let enrolled_baseline = memory.enrolled.is_none();
+        let enrolled = memory.enrolled.get_or_insert_with(BTreeSet::new);
+        self.dirty |= enrolled_baseline;
 
         for quest in quests {
             if memory.seen.insert(quest.id.clone()) {
@@ -83,16 +91,24 @@ impl QuestTracker {
                 self.dirty = true;
                 changes.expiring.push(quest.clone());
             }
+
+            if quest.status == QuestStatus::Enrolled && enrolled.insert(quest.id.clone()) {
+                self.dirty = true;
+                if !enrolled_baseline && !has_expired(quest, now) {
+                    changes.accepted.push(quest.clone());
+                }
+            }
         }
 
         // An empty list is more likely a format change than every quest being
         // gone: forgetting everything would announce them all again later.
         if !quests.is_empty() {
             let listed: HashSet<&str> = quests.iter().map(|quest| quest.id.as_str()).collect();
-            let before = memory.seen.len() + memory.warned.len();
+            let before = memory.seen.len() + memory.warned.len() + enrolled.len();
             memory.seen.retain(|id| listed.contains(id.as_str()));
             memory.warned.retain(|id| listed.contains(id.as_str()));
-            self.dirty |= memory.seen.len() + memory.warned.len() != before;
+            enrolled.retain(|id| listed.contains(id.as_str()));
+            self.dirty |= memory.seen.len() + memory.warned.len() + enrolled.len() != before;
         }
 
         self.statuses = quests.iter().map(|quest| (quest.id.clone(), quest.status)).collect();
@@ -239,6 +255,29 @@ mod tests {
         let mut restarted = QuestTracker::load(dir.path().join("quests-seen.json")).unwrap();
         let changes = restarted.observe(&[open("a"), open("b")], NOW);
         assert_eq!(ids(&changes.new), ["b"]);
+    }
+
+    #[test]
+    fn a_quest_accepted_after_the_first_look_is_reported_once() {
+        let (_dir, mut tracker) = tracker();
+        let already = quest("a", QuestStatus::Enrolled, None);
+        assert!(tracker.observe(&[already.clone(), open("b")], NOW).accepted.is_empty(), "the baseline");
+
+        let accepted = quest("b", QuestStatus::Enrolled, None);
+        let changes = tracker.observe(&[already.clone(), accepted.clone()], NOW);
+        assert_eq!(ids(&changes.accepted), ["b"]);
+        assert!(tracker.observe(&[already, accepted], NOW).accepted.is_empty());
+    }
+
+    #[test]
+    fn a_file_from_before_the_accepted_tracking_only_sets_its_baseline() {
+        let (dir, _) = tracker();
+        let file = dir.path().join("quests-seen.json");
+        std::fs::write(&file, r#"{ "seen": ["a"], "warned": [] }"#).unwrap();
+
+        let mut tracker = QuestTracker::load(file).unwrap();
+        assert!(tracker.observe(&[quest("a", QuestStatus::Enrolled, None)], NOW).accepted.is_empty());
+        assert_eq!(ids(&tracker.observe(&[quest("a", QuestStatus::Enrolled, None), quest("c", QuestStatus::Enrolled, None)], NOW).accepted), ["c"]);
     }
 
     #[test]

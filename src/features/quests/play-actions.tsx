@@ -11,6 +11,7 @@ import { cn } from "@/lib/cn";
 import { firstPlayable } from "@/lib/executables";
 import { useT } from "@/lib/i18n/use-t";
 import { playTask, taskMinutes, type QuestGame } from "@/lib/quests";
+import { radioGroupKeyDown, radioTabIndex } from "@/lib/radio-group";
 import type { Quest } from "@/types/domain";
 
 interface PlayActionsProps {
@@ -31,17 +32,24 @@ export function GamePicker({
   onSelect: (gameId: string) => void;
 }) {
   const { t } = useT();
+  const ids = games.map(({ game }) => game.id);
 
   return (
     <div className="mt-3">
       <p className="text-xs text-subtle">{t("quests.pickGame", { count: games.length })}</p>
-      <div role="radiogroup" aria-label={t("quests.pickGame", { count: games.length })} className="mt-1.5 flex flex-wrap gap-1.5">
+      <div
+        role="radiogroup"
+        aria-label={t("quests.pickGame", { count: games.length })}
+        onKeyDown={radioGroupKeyDown(ids, selectedId, onSelect)}
+        className="mt-1.5 flex flex-wrap gap-1.5"
+      >
         {games.map(({ game }) => (
           <button
             key={game.id}
             type="button"
             role="radio"
             aria-checked={game.id === selectedId}
+            tabIndex={radioTabIndex(ids, selectedId, game.id)}
             aria-label={game.name}
             title={game.name}
             onClick={() => {

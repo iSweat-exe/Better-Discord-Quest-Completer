@@ -1,12 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type {
+  AccountDetails,
   ActivityEntry,
   AppInfo,
   AppStats,
   Catalog,
   CleanReport,
   DetectionReport,
+  DiagnosticCheck,
+  InterruptedRun,
+  PrimaryGame,
+  QueueItem,
+  QueueStatus,
   DiscordStatus,
   ErrorKind,
   ImportReport,
@@ -14,6 +20,8 @@ import type {
   LogEntry,
   PresenceRequest,
   Profile,
+  ProfileEdit,
+  Guild,
   PresenceStatus,
   QuestRisk,
   QuestsResponse,
@@ -77,6 +85,19 @@ export const ipc = {
   stopSession: (sessionId: string) => call<void>("stop_session", { sessionId }),
   stopAllSessions: () => call<void>("stop_all_sessions"),
 
+  getQueue: () => call<QueueStatus>("get_queue"),
+  /** Adds quests to the queue; the first one starts at once when nothing is playing. */
+  enqueueQuests: (items: QueueItem[]) => call<QueueStatus>("enqueue_quests", { items }),
+  /** Gives up on one quest the queue plays: its game stops. */
+  skipQueueItem: (questId: string) => call<void>("skip_queue_item", { questId }),
+  stopQueue: () => call<void>("stop_queue"),
+  removeFromQueue: (questId: string) => call<void>("remove_from_queue", { questId }),
+
+  getInterruptedRun: () => call<InterruptedRun | null>("get_interrupted_run"),
+  /** Answers how many games and quests were picked up. */
+  resumeInterruptedRun: () => call<number>("resume_interrupted_run"),
+  dismissInterruptedRun: () => call<void>("dismiss_interrupted_run"),
+
   getQuestsConnection: () => call<boolean>("get_quests_connection"),
   /** The token is sent once, to be checked and stored; it never comes back. */
   connectQuests: (token: string) => call<QuestsResponse>("connect_quests", { token }),
@@ -95,6 +116,12 @@ export const ipc = {
   getAppStats: () => call<AppStats>("get_app_stats"),
   getQuestRisk: () => call<QuestRisk>("get_quest_risk"),
   getProfile: () => call<Profile>("get_profile"),
+  getAccount: () => call<AccountDetails>("get_account"),
+  getGuilds: () => call<Guild[]>("get_guilds"),
+  /** Writes on the account: only after the user confirmed in a dialog. */
+  editProfile: (edit: ProfileEdit) => call<AccountDetails>("edit_profile", { edit }),
+  /** Writes on the account: only after the user confirmed in a dialog. */
+  leaveGuild: (guildId: string, name: string) => call<void>("leave_guild", { guildId, name }),
   getOrbsBalance: () => call<number>("get_orbs_balance"),
   getOrbsShop: () => call<ShopResponse>("get_orbs_shop"),
   disconnectQuests: () => call<void>("disconnect_quests"),
@@ -106,6 +133,8 @@ export const ipc = {
   installUpdate: () => call<void>("install_update"),
 
   getDiscordStatus: () => call<DiscordStatus>("get_discord_status"),
+  getPrimaryGame: () => call<PrimaryGame | null>("get_primary_game"),
+  runDiagnostics: () => call<DiagnosticCheck[]>("run_diagnostics"),
   checkDetection: (sessionId: string) => call<DetectionReport>("check_detection", { sessionId }),
   revealExecutable: (gameId: string, executable: string) =>
     call<void>("reveal_executable", { gameId, executable }),

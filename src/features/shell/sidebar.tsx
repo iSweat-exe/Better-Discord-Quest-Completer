@@ -1,7 +1,8 @@
-import { CircleStop, ShoppingBag } from "lucide-react";
+import { CircleStop, ListOrdered, ShoppingBag, Stethoscope } from "lucide-react";
 import { Gamepad2Icon, RadioIcon, ScrollTextIcon, SettingsIcon, TrophyIcon } from "@/components/icons";
 import type { ReactNode } from "react";
 
+import { useQueueStore } from "@/features/queue/queue-store";
 import { usePrefetchQuests } from "@/features/quests/queries";
 import { useStopAllSessions } from "@/features/sessions/queries";
 import { useSessionStore } from "@/features/sessions/session-store";
@@ -10,8 +11,10 @@ import { Kbd } from "@/components/ui/primitives";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
 import { useT } from "@/lib/i18n/use-t";
+import { isQueueActive } from "@/lib/queue";
 import type { MessageKey } from "@/lib/i18n";
 
+import { GettingStarted } from "@/features/onboarding/getting-started";
 import { UpdateCard } from "@/features/update/update-card";
 
 import { modifierLabel, shortcutDigit } from "./shortcuts";
@@ -37,6 +40,7 @@ function NavItem({ page, icon, label }: { page: Page; icon: ReactNode; label: Me
   return (
     <button
       type="button"
+      data-tour={`nav-${page}`}
       aria-current={active ? "page" : undefined}
       onPointerEnter={prefetch}
       onFocus={prefetch}
@@ -100,6 +104,31 @@ function RunningSummary() {
   );
 }
 
+/** The quest queue at a glance, while it plays: where it stands, and a way to it. */
+function QueueSummary() {
+  const { t } = useT();
+  const status = useQueueStore((state) => state.status);
+  const navigate = useUiStore((state) => state.navigate);
+  if (!isQueueActive(status)) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        navigate("quests");
+      }}
+      className="flex h-8 items-center gap-2 rounded-control px-3 text-left text-[13px] text-muted transition-colors duration-150 hover:bg-raised hover:text-fg [&_svg]:size-4 [&_svg]:shrink-0"
+    >
+      <ListOrdered aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate">
+        {status.pending.length > 0
+          ? t("queue.sidebarWaiting", { playing: status.playing.length, waiting: status.pending.length })
+          : t("queue.sidebar", { count: status.playing.length })}
+      </span>
+    </button>
+  );
+}
+
 export function Sidebar() {
   const { t } = useT();
 
@@ -110,15 +139,18 @@ export function Sidebar() {
         <span className="text-[15px] font-semibold leading-tight tracking-tight">{t("app.name")}</span>
       </div>
 
-      <nav aria-label="Pages" className="flex flex-col gap-0.5">
+      <nav aria-label={t("nav.label")} className="flex flex-col gap-0.5">
         {PRIMARY_PAGES.map((item) => (
           <NavItem key={item.page} {...item} />
         ))}
       </nav>
 
       <div className="mt-auto flex flex-col">
+        <GettingStarted />
         <UpdateCard />
         <RunningSummary />
+        <QueueSummary />
+        <NavItem page="diagnostic" icon={<Stethoscope />} label="nav.diagnostic" />
         <NavItem page="settings" icon={<SettingsIcon />} label="nav.settings" />
         <SidebarProfile />
       </div>

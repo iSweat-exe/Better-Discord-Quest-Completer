@@ -1,6 +1,18 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-import type { Catalog, DownloadProgress, LogEntry, QuestDone, QuestsResponse, SessionInfo, UpdateInfo, VideoEnded, VideoProgress } from "@/types/domain";
+import type {
+  Catalog,
+  DownloadProgress,
+  LogEntry,
+  QuestDone,
+  QuestsResponse,
+  QueueStatus,
+  SessionInfo,
+  SlowDetection,
+  UpdateInfo,
+  VideoEnded,
+  VideoProgress,
+} from "@/types/domain";
 
 /** Event names emitted by the backend (see `state.rs` and `logger.rs`). */
 export const EVENTS = {
@@ -18,6 +30,10 @@ export const EVENTS = {
   updateAvailable: "update-available",
   updateProgress: "update-progress",
   appLog: "app-log",
+  queueChanged: "queue-changed",
+  sessionDetected: "session-detected",
+  detectionSlow: "detection-slow",
+  resumeChanged: "resume-changed",
 } as const;
 
 interface EventPayloads {
@@ -35,6 +51,10 @@ interface EventPayloads {
   [EVENTS.updateAvailable]: UpdateInfo;
   [EVENTS.updateProgress]: DownloadProgress;
   [EVENTS.appLog]: LogEntry;
+  [EVENTS.queueChanged]: QueueStatus;
+  [EVENTS.sessionDetected]: SessionInfo;
+  [EVENTS.detectionSlow]: SlowDetection;
+  [EVENTS.resumeChanged]: null;
 }
 
 /**

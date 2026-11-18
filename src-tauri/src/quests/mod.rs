@@ -5,11 +5,13 @@
 //! account's token, which makes this module the most sensitive part of the app.
 //! It therefore sticks to a strict contract:
 //!
-//! * **reads** with `GET` (the quests, the Orbs balance, the Orbs shop and the
-//!   account's public profile — nothing else of the account is ever read);
-//! * **writes** only on a click of the user, on one quest: accepting it,
-//!   claiming its reward, or reporting the progress of its video. Nothing is
-//!   written in the background; "play" quests are still completed by the fake games;
+//! * **reads** with `GET` (the quests, the Orbs balance, the Orbs shop, the
+//!   account's profile and its servers — never its email, phone or billing);
+//! * **writes** only on a click of the user, confirmed in a dialog that says
+//!   what will change: accepting a quest, claiming its reward, reporting the
+//!   progress of its video, editing the display name, bio or pronouns, or
+//!   leaving a server. Nothing is written in the background; "play" quests are
+//!   still completed by the fake games;
 //! * **paced**: [`crate::quest_watch`] looks at the quests once a minute while
 //!   a fake game runs, and every 20 minutes otherwise (only to announce new
 //!   quests, and only if the user wants those notifications);
@@ -17,6 +19,7 @@
 //!   disabled so it can never be forwarded elsewhere;
 //! * see [`token`] for how the token is stored and kept out of logs.
 
+pub mod account;
 pub mod client;
 pub mod model;
 pub mod risk;
@@ -26,6 +29,7 @@ pub mod tracker;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
@@ -35,6 +39,7 @@ use crate::logger::AppLog;
 use crate::storage;
 use crate::util::{now_millis, spawn_blocking};
 
+use self::account::{AccountDetails, Guild, ProfileEdit, parse_account, parse_guilds};
 use self::model::{Profile, Quest, parse_orbs_balance, parse_profile, parse_quests};
 use self::risk::{ActivityEntry, RiskLog, RiskReport, WriteKind};
 use self::shop::{ShopResponse, read_shop};
@@ -61,6 +66,11 @@ fn video_plan(answer: &serde_json::Value, quest_id: &str) -> Option<(u64, u64, i
     let enrolled = status.get("enrolled_at").or_else(|| status.get("enrolledAt"))?.as_str()?;
     let enrolled_at = chrono::DateTime::parse_from_rfc3339(enrolled).ok()?.timestamp_millis();
     Some((target, quest.progress_seconds.unwrap_or(0), enrolled_at))
+}
+
+/// The id of a `GET /users/@me` answer.
+fn text_id(me: &serde_json::Value) -> AppResult<String> {
+    model::text(me, &["id"]).ok_or_else(|| AppError::Network("Discord's account answer is not understood".into()))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,6 +107,9 @@ pub struct QuestService {
     /// Videos that were being watched when the app was closed: ids Discord may resume.
     interrupted_videos: Mutex<Vec<String>>,
     video_file: PathBuf,
+    /// Changes whenever the saved token does (saved, forgotten, rejected): a video
+    /// started with another token stops at its next report instead of carrying on with it.
+    token_generation: AtomicU64,
 }
 
 impl QuestService {
@@ -126,6 +139,7 @@ impl QuestService {
             interrupted_videos: Mutex::new(storage::read_json(&video_file).ok().flatten().unwrap_or_default()),
             video_file,
             cache_file,
+            token_generation: AtomicU64::new(0),
         })
     }
 
@@ -142,6 +156,7 @@ impl QuestService {
 
         let store = Arc::clone(&self.store);
         spawn_blocking(move || store.save(&token)).await??;
+        self.token_generation.fetch_add(1, Ordering::SeqCst);
         self.log.info("Discord token saved in the system credential store.");
         self.log.info(format!("{} Discord quest(s) loaded.", sync.response.quests.len()));
         Ok(sync)
@@ -187,6 +202,54 @@ impl QuestService {
         Ok(read_shop(&answer))
     }
 
+    /// The account in detail. The public profile (bio, pronouns, badges) is a
+    /// second request: when it fails, the rest is still shown.
+    pub async fn account(&self) -> AppResult<AccountDetails> {
+        let token = self.saved_token().await?;
+        let me = client::fetch_profile(&self.client, &token).await;
+        let me = self.forget_if_rejected(me).await?;
+        let id = text_id(&me)?;
+        let profile = client::fetch_user_profile(&self.client, &token, &id).await.ok();
+        parse_account(&me, profile.as_ref()).ok_or_else(|| AppError::Network("Discord's account answer is not understood".into()))
+    }
+
+    /// The servers the account is in.
+    pub async fn guilds(&self) -> AppResult<Vec<Guild>> {
+        let token = self.saved_token().await?;
+        let answer = client::fetch_guilds(&self.client, &token).await;
+        let answer = self.forget_if_rejected(answer).await?;
+        Ok(parse_guilds(&answer))
+    }
+
+    /// Changes the display name, bio or pronouns, then reads the account again.
+    pub async fn edit_profile(&self, edit: ProfileEdit) -> AppResult<AccountDetails> {
+        let edit = edit.validated()?;
+        let token = self.saved_token().await?;
+        if let Some(name) = &edit.display_name {
+            let done = client::patch_display_name(&self.client, &token, (!name.is_empty()).then_some(name.as_str())).await;
+            self.forget_if_rejected(done).await?;
+        }
+        if let Some(body) = edit.profile_body() {
+            let done = client::patch_user_profile(&self.client, &token, &body).await;
+            self.forget_if_rejected(done).await?;
+        }
+        let summary = edit.summary();
+        self.log.warn(format!("Account write: {summary} changed on the user's request."));
+        self.record_account_write(WriteKind::Profile, &summary);
+        self.account().await
+    }
+
+    /// Leaves a server. `name` is only used for the history.
+    pub async fn leave_guild(&self, guild_id: &str, name: &str) -> AppResult<()> {
+        let token = self.saved_token().await?;
+        let done = client::leave_guild(&self.client, &token, guild_id).await;
+        self.forget_if_rejected(done).await?;
+        let label: String = name.chars().take(100).collect();
+        self.log.warn(format!("Account write: left the server {label} on the user's request."));
+        self.record_account_write(WriteKind::LeaveGuild, &label);
+        Ok(())
+    }
+
     /// Accepts a quest, then reloads the quests.
     pub async fn enroll(&self, quest_id: &str) -> AppResult<QuestSync> {
         let token = self.saved_token().await?;
@@ -212,6 +275,7 @@ impl QuestService {
     /// progress that is ahead of the time since the quest was accepted).
     /// `on_progress(done, target)` is called with the seconds watched so far, after each report.
     pub async fn watch_video(&self, quest_id: &str, on_progress: impl Fn(u64, u64)) -> AppResult<QuestSync> {
+        let generation = self.token_generation.load(Ordering::SeqCst);
         let token = self.saved_token().await?;
         let answer = client::fetch_quests(&self.client, &token).await;
         let answer = self.forget_if_rejected(answer).await?;
@@ -221,6 +285,10 @@ impl QuestService {
         self.log.warn(format!("Account write: reporting the video progress of quest {quest_id} ({target} s) on the user's request."));
         self.record_write(WriteKind::Video, quest_id);
         for _ in 0..VIDEO_MAX_REPORTS {
+            // The token was forgotten or replaced meanwhile: it must not be used any longer.
+            if self.token_generation.load(Ordering::SeqCst) != generation {
+                return Err(AppError::TokenMissing);
+            }
             let allowed = u64::try_from(now_millis().saturating_sub(enrolled_at) / 1000).unwrap_or(0) + VIDEO_LEAD_SECONDS;
             if done + VIDEO_STEP_SECONDS <= allowed || done >= target {
                 done = (done + VIDEO_STEP_SECONDS).min(target);
@@ -256,8 +324,11 @@ impl QuestService {
     }
 
     fn record_write(&self, kind: WriteKind, quest_id: &str) {
-        let name = self.quest_name(quest_id);
-        if let Err(error) = self.risk.lock().unwrap_or_else(PoisonError::into_inner).record(kind, &name, now_millis()) {
+        self.record_account_write(kind, &self.quest_name(quest_id));
+    }
+
+    fn record_account_write(&self, kind: WriteKind, name: &str) {
+        if let Err(error) = self.risk.lock().unwrap_or_else(PoisonError::into_inner).record(kind, name, now_millis()) {
             self.log.warn(format!("Could not save the write history: {error}"));
         }
     }
@@ -310,10 +381,14 @@ impl QuestService {
         }
     }
 
-    /// Forgets the token.
+    /// Forgets the token. A video being watched stops at its next report, and the
+    /// videos left interrupted by a previous run are forgotten with the account.
     pub async fn disconnect(&self) -> AppResult<()> {
         let store = Arc::clone(&self.store);
         spawn_blocking(move || store.clear()).await??;
+        self.token_generation.fetch_add(1, Ordering::SeqCst);
+        self.interrupted_videos.lock().unwrap_or_else(PoisonError::into_inner).clear();
+        self.persist_videos();
         *self.cache.lock().unwrap_or_else(PoisonError::into_inner) = None;
         // Already gone is as good as removed.
         let _ = std::fs::remove_file(&self.cache_file);
@@ -437,6 +512,20 @@ mod tests {
         tauri::async_runtime::block_on(service.disconnect()).unwrap();
         assert!(!dir.path().join("quests-cache.json").exists());
         assert!(service.cache.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn forgetting_the_token_stops_its_videos_and_forgets_the_interrupted_ones() {
+        let (dir, service) = service();
+        service.interrupted_videos.lock().unwrap().push("123".into());
+        let before = service.token_generation.load(Ordering::SeqCst);
+
+        tauri::async_runtime::block_on(service.disconnect()).unwrap();
+
+        assert_ne!(service.token_generation.load(Ordering::SeqCst), before, "a running video sees the change");
+        assert!(service.interrupted_videos().is_empty());
+        let on_disk: Option<Vec<String>> = storage::read_json(&dir.path().join("quests-video-watch.json")).unwrap();
+        assert_eq!(on_disk, Some(Vec::new()));
     }
 
     #[test]

@@ -49,6 +49,8 @@ const KIND_LABELS = {
   enroll: "profile.history.enroll",
   claim: "profile.history.claim",
   video: "profile.history.video",
+  profile: "profile.history.profile",
+  leaveGuild: "profile.history.leaveGuild",
 } as const satisfies Record<string, MessageKey>;
 
 /** What the app wrote on the account, newest first: it is what makes the ban-risk level rise. */

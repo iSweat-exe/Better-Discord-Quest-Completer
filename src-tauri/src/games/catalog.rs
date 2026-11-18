@@ -10,7 +10,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use serde::de::IgnoredAny;
@@ -24,6 +24,9 @@ use crate::util::{now_millis, spawn_blocking};
 
 const DETECTABLE_URL: &str = "https://discord.com/api/v10/applications/detectable";
 const CACHE_TTL_MS: i64 = 24 * 60 * 60 * 1000;
+/// After a background download failed (offline, Discord down…), the next one
+/// waits at least this long instead of being retried on every request.
+const BACKGROUND_RETRY_MS: i64 = 10 * 60 * 1000;
 const BUNDLED_SNAPSHOT: &[u8] = include_bytes!("../../assets/gamelist.min.json");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -70,6 +73,8 @@ pub struct CatalogService {
     load_lock: tokio::sync::Mutex<()>,
     /// A download started in the background is under way.
     refreshing: AtomicBool,
+    /// No background download before this time (Unix ms), set after a failure.
+    retry_after: AtomicI64,
 }
 
 impl CatalogService {
@@ -83,6 +88,7 @@ impl CatalogService {
             current: RwLock::new(None),
             load_lock: tokio::sync::Mutex::new(()),
             refreshing: AtomicBool::new(false),
+            retry_after: AtomicI64::new(0),
         })
     }
 
@@ -124,12 +130,16 @@ impl CatalogService {
         Ok(known(self.publish(catalog)))
     }
 
-    /// Claims the right to refresh in the background; `false` if one is already under way.
+    /// Claims the right to refresh in the background; `false` if one is already
+    /// under way, or if the previous one failed only moments ago.
     pub fn begin_background_refresh(&self) -> bool {
-        !self.refreshing.swap(true, Ordering::AcqRel)
+        now_millis() >= self.retry_after.load(Ordering::Acquire) && !self.refreshing.swap(true, Ordering::AcqRel)
     }
 
-    pub fn end_background_refresh(&self) {
+    /// `failed`: the download did not succeed, so the next one is held back for a while.
+    pub fn end_background_refresh(&self, failed: bool) {
+        let retry_after = if failed { now_millis() + BACKGROUND_RETRY_MS } else { 0 };
+        self.retry_after.store(retry_after, Ordering::Release);
         self.refreshing.store(false, Ordering::Release);
     }
 
@@ -338,8 +348,21 @@ mod tests {
 
         assert!(service.begin_background_refresh());
         assert!(!service.begin_background_refresh());
-        service.end_background_refresh();
+        service.end_background_refresh(false);
         assert!(service.begin_background_refresh());
+    }
+
+    #[test]
+    fn a_failed_background_refresh_is_not_retried_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = service(&dir);
+
+        assert!(service.begin_background_refresh());
+        service.end_background_refresh(true);
+        assert!(!service.begin_background_refresh(), "offline, every request would start a new download");
+
+        service.retry_after.store(0, Ordering::Release);
+        assert!(service.begin_background_refresh(), "it is tried again once the delay is over");
     }
 
     #[test]

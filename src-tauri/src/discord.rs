@@ -5,6 +5,9 @@
 //! * [`check_detection`] answers "did Discord notice my fake game?" by reading
 //!   the end of Discord's own local log. It is read-only, only looks for the
 //!   game being checked, and nothing it reads is stored or sent anywhere.
+//! * [`primary_game`] tells which game Discord puts forward ("Playing …"), from
+//!   the same log, and [`slow_detection_cause`] the likely reason a fake game is
+//!   still not seen.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -114,27 +117,32 @@ fn line_timestamp(line: &str) -> Option<i64> {
 /// * `game_id`: Discord's application id of the game;
 /// * `exe_key`: the fake executable's full path, lower-cased with `/` separators.
 fn analyze(log: &str, game_id: &str, exe_key: &str, since: i64) -> DetectionReport {
+    let primary_key = format!("newprimarykey={exe_key}");
     let heartbeat = format!("for game {game_id} ");
+    let mut detected_at = None;
     let mut reacted_at = None;
 
-    for line in log.lines() {
-        let Some(at) = line_timestamp(line).filter(|at| *at >= since - CLOCK_TOLERANCE_MS) else { continue };
-
-        let lowered = line.to_lowercase();
-        let names_our_game = lowered.contains(&format!("newprimarykey={exe_key}"))
-            || lowered.contains(&heartbeat);
-        if names_our_game {
-            return DetectionReport { state: DetectionState::Detected, detected_at: Some(at) };
+    // The log is chronological: it is read from its end and only back to the
+    // session's start, instead of parsing megabytes of older lines on every poll.
+    // Going backwards, the last match seen is the earliest one.
+    for line in log.lines().rev() {
+        let Some(at) = line_timestamp(line) else { continue };
+        if at < since - CLOCK_TOLERANCE_MS {
+            break;
         }
 
-        if reacted_at.is_none() && line.contains("[RunningGameStore] Running Games Changed") {
+        let lowered = line.to_lowercase();
+        if lowered.contains(&primary_key) || lowered.contains(&heartbeat) {
+            detected_at = Some(at);
+        } else if line.contains("[RunningGameStore] Running Games Changed") {
             reacted_at = Some(at);
         }
     }
 
-    match reacted_at {
-        Some(at) => DetectionReport { state: DetectionState::Reacted, detected_at: Some(at) },
-        None => DetectionReport { state: DetectionState::Waiting, detected_at: None },
+    match (detected_at, reacted_at) {
+        (Some(at), _) => DetectionReport { state: DetectionState::Detected, detected_at: Some(at) },
+        (None, Some(at)) => DetectionReport { state: DetectionState::Reacted, detected_at: Some(at) },
+        (None, None) => DetectionReport { state: DetectionState::Waiting, detected_at: None },
     }
 }
 
@@ -163,6 +171,108 @@ pub fn check_many(requests: &[DetectionRequest]) -> Vec<DetectionReport> {
             None => DetectionReport { state: DetectionState::LogUnavailable, detected_at: None },
         })
         .collect()
+}
+
+/// The game Discord currently puts forward ("Playing …"), as its log last told it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrimaryGame {
+    pub name: String,
+    /// The game's executable, lower-cased with `/` separators.
+    pub exe_path: String,
+    /// Unix milliseconds of the log line.
+    pub at: i64,
+    /// One of this app's fake games.
+    pub ours: bool,
+}
+
+/// The game named by the last change of Discord's primary game, or `None` when
+/// that change was to no game at all, or when the log never names one.
+///
+/// The line looks like `… visibleGame=Overwatch newPrimaryKey=c:/…/overwatch.exe:Overwatch currentSessionGameKey=…`.
+fn parse_primary(log: &str) -> Option<(String, String, i64)> {
+    const KEY: &str = "newPrimaryKey=";
+    let line = log.lines().rev().find(|line| line.contains(KEY))?;
+    let at = line_timestamp(line)?;
+
+    let value = &line[line.find(KEY)? + KEY.len()..];
+    let value = value.split(" currentSessionGameKey=").next().unwrap_or(value);
+    // ASCII lower-casing keeps the byte offsets, so the index is valid in `value`.
+    let split = value.to_ascii_lowercase().find(".exe:")?;
+    let exe_path = value[..split + 4].to_lowercase().replace('\\', "/");
+    let name = value[split + 5..].trim();
+    if name.is_empty() {
+        return None;
+    }
+    Some((name.to_owned(), exe_path, at))
+}
+
+/// Which game Discord puts forward right now; `games_dir` tells the app's own fake games apart.
+pub fn primary_game(games_dir: &Path) -> Option<PrimaryGame> {
+    let log = read_tail(&locate_log()?, LOG_TAIL_BYTES).ok()?;
+    primary_from_log(&log, games_dir)
+}
+
+fn primary_from_log(log: &str, games_dir: &Path) -> Option<PrimaryGame> {
+    let (name, exe_path, at) = parse_primary(log)?;
+    let ours = exe_path.starts_with(&games_key(games_dir));
+    Some(PrimaryGame { name, exe_path, at, ours })
+}
+
+/// A folder as Discord writes paths in its log: lower-cased, `/` separators, trailing `/`.
+fn games_key(games_dir: &Path) -> String {
+    let mut key = games_dir.to_string_lossy().to_lowercase().replace('\\', "/");
+    if !key.ends_with('/') {
+        key.push('/');
+    }
+    key
+}
+
+/// Why a fake game is probably still not detected (payload of a slow-detection alert).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", tag = "kind", content = "detail")]
+pub enum SlowCause {
+    /// No Discord desktop client runs.
+    DiscordNotRunning,
+    /// Only a client without game detection runs (Vesktop…).
+    UnsupportedClient(String),
+    /// Discord runs but its log cannot be read: nothing more can be told.
+    LogUnavailable,
+    /// Discord puts another game forward: it names the others only every 5 minutes.
+    OtherPrimaryGame(String),
+    /// Nothing visible: most likely the activity privacy setting.
+    Unknown,
+}
+
+pub fn slow_detection_cause(games_dir: &Path) -> SlowCause {
+    let status = status();
+    if !status.running {
+        return status.unsupported_client.map_or(SlowCause::DiscordNotRunning, SlowCause::UnsupportedClient);
+    }
+    let Some(log) = locate_log().and_then(|path| read_tail(&path, LOG_TAIL_BYTES).ok()) else {
+        return SlowCause::LogUnavailable;
+    };
+    match primary_from_log(&log, games_dir) {
+        Some(primary) if !primary.ours => SlowCause::OtherPrimaryGame(primary.name),
+        _ => SlowCause::Unknown,
+    }
+}
+
+/// Where Discord's log is and when it was last written, for the diagnostics.
+pub fn log_info() -> Option<(PathBuf, Option<i64>)> {
+    let path = locate_log()?;
+    let modified = path
+        .metadata()
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok());
+    Some((path, modified))
+}
+
+/// Whether the log can be read at all.
+pub fn log_readable(path: &Path) -> bool {
+    read_tail(path, 1024).is_ok()
 }
 
 /// Reads Discord's log and reports whether it noticed one fake game.
@@ -251,6 +361,54 @@ mod tests {
         );
         let report = analyze(&log, "356875221078245376", EXE, at("2026-10-20 21:13:33.000"));
         assert_eq!(report.state, DetectionState::Waiting);
+    }
+
+    #[test]
+    fn the_earliest_sign_after_the_launch_wins() {
+        let log = format!(
+            "[2026-10-20 20:00:00.000] [info]  newPrimaryKey={EXE}:Overwatch (an earlier run)\n\
+             [2026-10-20 21:13:40.000] [info]  [RunningGameStore] Running Games Changed [object Object]\n\
+             continuation line without a timestamp\n\
+             [2026-10-20 21:13:54.915] [info]  newPrimaryKey={EXE}:Overwatch\n\
+             [2026-10-20 21:18:54.000] [warn]  Failed to get performance snapshot for game 356875221078245376 x\n"
+        );
+        let report = analyze(&log, "356875221078245376", EXE, at("2026-10-20 21:13:33.000"));
+        assert_eq!(report.state, DetectionState::Detected);
+        assert_eq!(report.detected_at, Some(at("2026-10-20 21:13:54.915")));
+    }
+
+    const GAMES: &str = "C:\\Users\\me\\AppData\\Local\\dev.questcompleter.app\\games";
+
+    #[test]
+    fn the_primary_game_is_the_last_one_discord_named() {
+        let log = format!(
+            "[2026-10-20 21:00:00.000] [info]  [Clips] decider: handleRunningGamesChange visibleGame=Roblox newPrimaryKey=c:/program files/roblox/robloxplayerbeta.exe:Roblox currentSessionGameKey=x\n\
+             [2026-10-20 21:13:54.915] [info]  [Clips] decider: handleRunningGamesChange visibleGame=Overwatch 2 newPrimaryKey={EXE}:Overwatch 2 currentSessionGameKey=x\n\
+             [2026-10-20 21:14:00.000] [info]  something else\n"
+        );
+        let primary = primary_from_log(&log, Path::new(GAMES)).unwrap();
+        assert_eq!(primary.name, "Overwatch 2");
+        assert_eq!(primary.exe_path, EXE);
+        assert_eq!(primary.at, at("2026-10-20 21:13:54.915"));
+        assert!(primary.ours);
+    }
+
+    #[test]
+    fn a_real_game_in_front_is_not_ours() {
+        let log = "[2026-10-20 21:00:00.000] [info]  visibleGame=Roblox newPrimaryKey=c:/program files/roblox/robloxplayerbeta.exe:Roblox currentSessionGameKey=x\n";
+        let primary = primary_from_log(log, Path::new(GAMES)).unwrap();
+        assert_eq!(primary.name, "Roblox");
+        assert!(!primary.ours);
+    }
+
+    #[test]
+    fn no_primary_game_when_the_last_change_names_none() {
+        let log = format!(
+            "[2026-10-20 21:00:00.000] [info]  newPrimaryKey={EXE}:Overwatch currentSessionGameKey=x\n\
+             [2026-10-20 21:30:00.000] [info]  visibleGame=null newPrimaryKey=null currentSessionGameKey=null\n"
+        );
+        assert!(primary_from_log(&log, Path::new(GAMES)).is_none());
+        assert!(primary_from_log("nothing here\n", Path::new(GAMES)).is_none());
     }
 
     #[test]

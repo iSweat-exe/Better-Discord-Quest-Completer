@@ -30,7 +30,7 @@ function resolveTheme(theme: "system" | ResolvedTheme): ResolvedTheme {
  * the global keyboard shortcut. Renders nothing.
  */
 export function Bootstrap() {
-  const { data: settings } = useSettings();
+  const { data: settings, isError: settingsFailed } = useSettings();
   const queryClient = useQueryClient();
   const setLocale = useLocaleStore((state) => state.setLocale);
 
@@ -40,11 +40,15 @@ export function Bootstrap() {
   // Show the quests as last seen right away: the page then never waits for Discord,
   // and refreshes behind the scenes once the data is older than its freshness window.
   useEffect(() => {
-    void ipc.getCachedQuests().then((cached) => {
-      if (cached && queryClient.getQueryData(queryKeys.quests) === undefined) {
-        queryClient.setQueryData(queryKeys.quests, cached, { updatedAt: cached.fetchedAt });
-      }
-    });
+    ipc
+      .getCachedQuests()
+      .then((cached) => {
+        if (cached && queryClient.getQueryData(queryKeys.quests) === undefined) {
+          queryClient.setQueryData(queryKeys.quests, cached, { updatedAt: cached.fetchedAt });
+        }
+      })
+      // A missing cache only means the quests are fetched the normal way.
+      .catch(() => undefined);
   }, [queryClient]);
 
   // The first search over ten thousand games takes a moment: pay for it while idle,
@@ -93,7 +97,8 @@ export function Bootstrap() {
 
   // The window starts hidden so it never flashes with the wrong theme; the
   // backend then decides whether to show it (not when started in the tray).
-  const ready = settings !== undefined;
+  // Settings that fail to load must not keep it hidden: the UI shows the error.
+  const ready = settings !== undefined || settingsFailed;
   useEffect(() => {
     if (ready && isTauri()) void ipc.windowReady();
   }, [ready]);

@@ -65,8 +65,14 @@ describe("TokenGate", () => {
     await openDialog();
 
     expect(screen.getByText("How do I find my token?")).toBeInTheDocument();
+    // One step at a time, with what to look for and a way to the right page.
+    expect(screen.getByText("Step 1 of 5")).toBeInTheDocument();
     expect(screen.getByText(/Open discord\.com\/app in your browser/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open discord.com/app" })).toBeInTheDocument();
+    for (let step = 0; step < 3; step++) await userEvent.click(screen.getByRole("button", { name: "Next step" }));
+    expect(screen.getByText("Step 4 of 5")).toBeInTheDocument();
     expect(screen.getByText(/“authorization” line/)).toBeInTheDocument();
+    // The warnings stay in view whatever the step.
     expect(screen.getByText(/Never paste code into the browser console/)).toBeInTheDocument();
     expect(screen.getByText(/change your Discord password/)).toBeInTheDocument();
   });

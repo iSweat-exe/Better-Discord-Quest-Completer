@@ -14,7 +14,6 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_notification::NotificationExt;
 
 use crate::error::AppError;
 use crate::games::library::LibraryEntry;
@@ -35,6 +34,9 @@ const STARTUP_DELAY: Duration = Duration::from_secs(15);
 /// Discord updates the progress about once a minute, so looking faster is useless.
 const ACTIVE_INTERVAL: Duration = Duration::from_secs(60);
 const IDLE_INTERVAL: Duration = Duration::from_secs(20 * 60);
+/// While quests accepted in Discord should start by themselves: soon enough
+/// after the click, still far from a polling loop.
+const AUTO_PLAY_INTERVAL: Duration = Duration::from_secs(5 * 60);
 /// After a failure (network down, rate limit…) the next look waits at least this long.
 const ERROR_BACKOFF: Duration = Duration::from_secs(5 * 60);
 
@@ -52,9 +54,11 @@ pub struct QuestDone {
 }
 
 /// How long to wait between two looks, or `None` when no look is wanted.
-fn look_interval(running_games: usize, notify_new_quests: bool) -> Option<Duration> {
+fn look_interval(running_games: usize, notify_new_quests: bool, auto_play_accepted: bool) -> Option<Duration> {
     if running_games > 0 {
         Some(ACTIVE_INTERVAL)
+    } else if auto_play_accepted {
+        Some(AUTO_PLAY_INTERVAL)
     } else if notify_new_quests {
         Some(IDLE_INTERVAL)
     } else {
@@ -77,7 +81,9 @@ pub fn spawn(app: AppHandle) {
             ticker.tick().await;
             let state = app.state::<Shared>();
 
-            let Some(interval) = look_interval(state.sessions.count(), state.settings.get().notify_new_quests) else {
+            let settings = state.settings.get();
+            let Some(interval) = look_interval(state.sessions.count(), settings.notify_new_quests, settings.auto_play_accepted)
+            else {
                 continue;
             };
             if last_look.is_some_and(|at| at.elapsed() < interval.max(backoff)) {
@@ -137,8 +143,18 @@ pub fn apply(app: &AppHandle, changes: QuestChanges) {
         credit_the_app(app, quest);
     }
 
+    // The queue moves on as soon as Discord confirms the quest it plays, whatever the setting.
+    crate::queue::quests_completed(app, &changes.completed);
     if settings.auto_stop_on_complete {
         stop_games_of(app, &changes.completed);
+    }
+
+    if settings.auto_play_accepted && !changes.accepted.is_empty() {
+        let names = names(&changes.accepted);
+        state.log.info(format!("Quest(s) accepted: {}. Their games join the queue.", names.join(", ")));
+        let app = app.clone();
+        let accepted = changes.accepted.clone();
+        tauri::async_runtime::spawn(async move { crate::queue::enqueue_quests(&app, &accepted).await });
     }
 
     if !changes.new.is_empty() {
@@ -250,7 +266,7 @@ fn names_of<'a>(quests: &[&'a Quest]) -> Vec<&'a str> {
 }
 
 fn notify(app: &AppHandle, title: &str, body: &str) {
-    let _ = app.notification().builder().title(title).body(body).show();
+    lifecycle::notify(app, title, body);
 }
 
 #[cfg(test)]
@@ -297,14 +313,20 @@ mod tests {
 
     #[test]
     fn quests_are_looked_at_faster_while_a_game_runs() {
-        assert_eq!(look_interval(1, false), Some(ACTIVE_INTERVAL));
-        assert_eq!(look_interval(2, true), Some(ACTIVE_INTERVAL));
+        assert_eq!(look_interval(1, false, false), Some(ACTIVE_INTERVAL));
+        assert_eq!(look_interval(2, true, true), Some(ACTIVE_INTERVAL));
     }
 
     #[test]
     fn an_idle_app_only_looks_when_new_quests_are_wanted() {
-        assert_eq!(look_interval(0, true), Some(IDLE_INTERVAL));
-        assert_eq!(look_interval(0, false), None);
+        assert_eq!(look_interval(0, true, false), Some(IDLE_INTERVAL));
+        assert_eq!(look_interval(0, false, false), None);
+    }
+
+    #[test]
+    fn quests_accepted_in_discord_are_noticed_within_minutes_when_they_start_by_themselves() {
+        assert_eq!(look_interval(0, false, true), Some(AUTO_PLAY_INTERVAL));
+        assert_eq!(look_interval(0, true, true), Some(AUTO_PLAY_INTERVAL));
     }
 
     #[test]

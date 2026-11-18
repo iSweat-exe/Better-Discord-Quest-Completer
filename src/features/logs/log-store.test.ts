@@ -23,6 +23,16 @@ describe("log store", () => {
     expect(useLogStore.getState().entries).toHaveLength(2);
   });
 
+  it("keeps the lines that arrived live before the initial snapshot", () => {
+    useLogStore.getState().append(entry(3));
+    useLogStore.getState().merge([entry(1), entry(2), entry(3)]);
+    expect(useLogStore.getState().entries.map((item) => item.id)).toEqual([1, 2, 3]);
+
+    useLogStore.getState().append(entry(5));
+    useLogStore.getState().merge([entry(4)]);
+    expect(useLogStore.getState().entries.map((item) => item.id)).toEqual([1, 2, 3, 4, 5]);
+  });
+
   it("keeps only the most recent entries", () => {
     useLogStore.getState().replace(Array.from({ length: 600 }, (_, index) => entry(index)));
     const { entries } = useLogStore.getState();

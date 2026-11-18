@@ -15,6 +15,19 @@ export function useDiscordStatus() {
   });
 }
 
+const PRIMARY_REFRESH_MS = 10_000;
+
+/** The game Discord puts forward, read from its log while fake games run. */
+export function usePrimaryGame(enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.primaryGame,
+    queryFn: ipc.getPrimaryGame,
+    enabled,
+    staleTime: 0,
+    refetchInterval: enabled ? PRIMARY_REFRESH_MS : false,
+  });
+}
+
 /** Asks Discord's own log whether it noticed the game of a session. */
 export function useCheckDetection() {
   return useMutation({ mutationFn: (sessionId: string) => ipc.checkDetection(sessionId) });

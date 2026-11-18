@@ -1,6 +1,7 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState, type ReactNode } from "react";
 
-import { CheckIcon, CircleHelpIcon, EyeIcon, EyeOffIcon, KeyRoundIcon, ShieldAlertIcon, ShieldCheckIcon, TriangleAlertIcon, TrophyIcon, XIcon } from "@/components/icons";
+import { CheckIcon, CircleHelpIcon, ExternalLinkIcon, EyeIcon, EyeOffIcon, KeyRoundIcon, ShieldAlertIcon, ShieldCheckIcon, TriangleAlertIcon, TrophyIcon, XIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { DisclosureChevron } from "@/components/ui/disclosure-chevron";
 import { Field, TextInput } from "@/components/ui/field";
@@ -21,12 +22,31 @@ const HELP_STEPS = [
   "token.help.step5",
 ] as const satisfies readonly MessageKey[];
 
-/** Step-by-step guide for people who have never looked for their token. */
+/** What each step looks for, shown under its instruction: a way to check one is on track. */
+const STEP_CHECKS = [
+  "token.guide.check1",
+  "token.guide.check2",
+  "token.guide.check3",
+  "token.guide.check4",
+  "token.guide.check5",
+] as const satisfies readonly MessageKey[];
+
+const DISCORD_APP_URL = "https://discord.com/app";
+
+/**
+ * A step-by-step guide for people who have never looked for their token: one
+ * step at a time, with what they should see to know they are on track, and the
+ * warnings always in view. Open by default, it can be folded away by those who know.
+ */
 function TokenHelp() {
   const { t } = useT();
+  const [step, setStep] = useState(0);
+  const last = step === HELP_STEPS.length - 1;
+  const instruction = HELP_STEPS[step] ?? HELP_STEPS[0];
+  const check = STEP_CHECKS[step] ?? STEP_CHECKS[0];
 
   return (
-    <details className="group rounded-inner bg-sunken text-[13px]">
+    <details open className="group rounded-inner bg-sunken text-[13px]">
       <summary className="flex cursor-pointer select-none items-center gap-2 rounded-inner px-3.5 py-3 font-medium hover:text-accent-text">
         <CircleHelpIcon size={16} />
         {t("token.help.title")}
@@ -36,16 +56,52 @@ function TokenHelp() {
       <div className="space-y-3 px-3.5 pb-3.5">
         <p className="text-muted">{t("token.help.intro")}</p>
 
-        <ol className="space-y-2">
-          {HELP_STEPS.map((step, index) => (
-            <li key={step} className="flex items-start gap-2.5 leading-snug">
-              <span className="mt-px grid size-5 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-semibold tabular-nums text-accent-text">
-                {index + 1}
-              </span>
-              <span>{t(step)}</span>
-            </li>
-          ))}
-        </ol>
+        <div className="rounded-lg bg-surface p-3.5 shadow-card" aria-live="polite">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-medium text-subtle">
+              {t("token.guide.progress", { step: step + 1, total: HELP_STEPS.length })}
+            </p>
+            <div className="flex gap-1" aria-hidden="true">
+              {HELP_STEPS.map((key, index) => (
+                <span key={key} className={cn("h-1 w-5 rounded-full", index <= step ? "bg-accent" : "bg-sunken")} />
+              ))}
+            </div>
+          </div>
+          <p className="mt-2 flex items-start gap-2.5 leading-snug">
+            <span className="mt-px grid size-5 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-semibold tabular-nums text-accent-text">
+              {step + 1}
+            </span>
+            <span className="font-medium">{t(instruction)}</span>
+          </p>
+          <p className="mt-1.5 pl-[1.875rem] text-xs leading-snug text-muted">{t(check)}</p>
+
+          {step === 0 ? (
+            <div className="mt-3 pl-[1.875rem]">
+              <Button
+                size="sm"
+                onClick={() => {
+                  void openUrl(DISCORD_APP_URL).catch(() => undefined);
+                }}
+              >
+                <ExternalLinkIcon size={14} />
+                {t("token.guide.open")}
+              </Button>
+            </div>
+          ) : null}
+
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <Button size="sm" variant="ghost" disabled={step === 0} onClick={() => setStep(step - 1)}>
+              {t("tour.back")}
+            </Button>
+            {last ? (
+              <span className="text-xs font-medium text-success">{t("token.guide.done")}</span>
+            ) : (
+              <Button size="sm" variant="primary" onClick={() => setStep(step + 1)}>
+                {t("token.guide.next")}
+              </Button>
+            )}
+          </div>
+        </div>
 
         <ul className="space-y-1.5 rounded-lg bg-warning-soft p-3 text-warning">
           {(["token.help.warn1", "token.help.warn2"] as const).map((warning) => (

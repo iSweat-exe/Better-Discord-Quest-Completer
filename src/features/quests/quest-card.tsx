@@ -11,6 +11,7 @@ import { firstPlayable } from "@/lib/executables";
 import { formatDuration, formatRelativeTime } from "@/lib/format";
 import type { MessageKey } from "@/lib/i18n";
 import { useT } from "@/lib/i18n/use-t";
+import { formatOrbsValue } from "@/lib/orbs";
 import {
   isOpen,
   isVideoQuest,
@@ -118,7 +119,17 @@ export const QuestCard = memo(function QuestCard({ quest, now, resolved: games, 
               </Badge>
             ))}
             {quest.anyTask && quest.tasks.length > 1 ? <span className="text-subtle">{t("quests.anyTask")}</span> : null}
-            {quest.reward ? <span>{t("quests.reward", { reward: quest.reward })}</span> : null}
+            {quest.reward ? (
+              <span>
+                {t("quests.reward", { reward: quest.reward })}
+                {quest.rewardOrbs ? (
+                  <span className="text-subtle" title={t("orbs.valueHint")}>
+                    {" "}
+                    ({formatOrbsValue(quest.rewardOrbs, locale)})
+                  </span>
+                ) : null}
+              </span>
+            ) : null}
             {quest.expiresAt !== null ? (
               <span className={cn(state === "expired" && "text-warning")}>
                 {state === "expired"

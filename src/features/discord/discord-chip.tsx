@@ -21,6 +21,7 @@ export function DiscordChip() {
   const chip = (
     <span
       role="status"
+      data-tour="discord"
       tabIndex={hint ? 0 : -1}
       className="inline-flex h-11 shrink-0 items-center gap-2 rounded-control bg-surface px-3.5 text-[13px] font-medium shadow-card"
     >

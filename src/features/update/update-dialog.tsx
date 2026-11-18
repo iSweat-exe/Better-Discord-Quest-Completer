@@ -5,7 +5,7 @@ import { Spinner } from "@/components/ui/primitives";
 import { useSessionStore } from "@/features/sessions/session-store";
 import { formatRelativeTime } from "@/lib/format";
 import { useT } from "@/lib/i18n/use-t";
-import { useNow } from "@/lib/use-now";
+import { useMinute } from "@/lib/use-now";
 
 import { useInstallUpdate } from "./queries";
 import { downloadPercent, useUpdateStore } from "./update-store";
@@ -13,7 +13,7 @@ import { downloadPercent, useUpdateStore } from "./update-store";
 /** Release notes and the final "update now". Renders nothing without an update. */
 export function UpdateDialog() {
   const { t, locale } = useT();
-  const now = useNow();
+  const now = useMinute();
   const info = useUpdateStore((state) => state.info);
   const open = useUpdateStore((state) => state.dialogOpen);
   const phase = useUpdateStore((state) => state.phase);

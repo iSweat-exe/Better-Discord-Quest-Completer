@@ -20,6 +20,11 @@ pub fn is_available() -> bool {
     !RUNNER.is_empty()
 }
 
+/// Size of the embedded runner, in bytes.
+pub fn size() -> usize {
+    RUNNER.len()
+}
+
 /// Makes sure a copy of the runner exists at `destination`.
 ///
 /// The parent folder must already exist.

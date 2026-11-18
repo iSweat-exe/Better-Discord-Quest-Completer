@@ -14,7 +14,7 @@ import { cn } from "@/lib/cn";
 import { firstPlayable, isPlayable } from "@/lib/executables";
 import { formatRelativeTime } from "@/lib/format";
 import { useT } from "@/lib/i18n/use-t";
-import { useNow } from "@/lib/use-now";
+import { useMinute } from "@/lib/use-now";
 import { indexFor, searchGames } from "@/lib/search";
 import type { Catalog, Game } from "@/types/domain";
 
@@ -26,7 +26,7 @@ const optionId = (game: Game) => `game-option-${game.id}`;
 function CatalogStatus({ catalog }: { catalog: Catalog }) {
   const { t, locale } = useT();
   const refresh = useRefreshCatalog();
-  const now = useNow();
+  const now = useMinute();
 
   const source =
     catalog.source === "discord"
@@ -226,7 +226,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
           onKeyDown={onKeyDown}
           className="h-8 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-subtle"
         />
-        <Kbd>Esc</Kbd>
+        <Kbd>{t("search.escKey")}</Kbd>
       </div>
 
       <div className="min-h-[216px]">

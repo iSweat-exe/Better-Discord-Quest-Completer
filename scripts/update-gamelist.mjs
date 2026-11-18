@@ -2,9 +2,9 @@
 // Télécharge la liste des applications détectables de Discord et en écrit une
 // version allégée dans `src-tauri/assets/gamelist.min.json`.
 //
-// Ce snapshot sert de dernier recours lorsque ni le miroir, ni l'API Discord,
-// ni le cache disque ne sont disponibles. Le schéma de sortie doit rester
-// synchronisé avec `src-tauri/src/catalog/model.rs`.
+// Ce snapshot sert de dernier recours lorsque ni l'API Discord ni le cache
+// disque ne sont disponibles. Le schéma de sortie doit rester synchronisé avec
+// `src-tauri/src/games/model.rs`.
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

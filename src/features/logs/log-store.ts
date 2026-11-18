@@ -7,6 +7,8 @@ const CAPACITY = 500;
 interface LogState {
   entries: LogEntry[];
   replace: (entries: LogEntry[]) => void;
+  /** Adds a snapshot to what is shown, keeping the lines that arrived live before it. */
+  merge: (entries: LogEntry[]) => void;
   append: (entry: LogEntry) => void;
   clear: () => void;
 }
@@ -15,6 +17,13 @@ export const useLogStore = create<LogState>((set) => ({
   entries: [],
   replace: (entries) => {
     set({ entries: entries.slice(-CAPACITY) });
+  },
+  merge: (entries) => {
+    set((state) => {
+      const known = new Set(entries.map((entry) => entry.id));
+      const live = state.entries.filter((entry) => !known.has(entry.id));
+      return { entries: [...entries, ...live].sort((a, b) => a.id - b.id).slice(-CAPACITY) };
+    });
   },
   append: (entry) => {
     set((state) => {

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import { ipc } from "@/lib/ipc";
 import { queryKeys } from "@/lib/query";
@@ -67,6 +67,21 @@ export function useOrbsShop() {
 }
 
 /** Sends the token once: it is checked, stored by the backend and forgotten here. */
+/**
+ * Drops what belongs to the account whose token was just forgotten or replaced:
+ * nothing of it may stay on screen, and the next account's data is fetched afresh.
+ */
+export function forgetAccountData(queryClient: QueryClient) {
+  queryClient.removeQueries({ queryKey: queryKeys.quests });
+  queryClient.removeQueries({ queryKey: queryKeys.orbsBalance });
+  queryClient.removeQueries({ queryKey: queryKeys.orbsShop });
+  queryClient.removeQueries({ queryKey: queryKeys.profile });
+  queryClient.removeQueries({ queryKey: queryKeys.account });
+  queryClient.removeQueries({ queryKey: queryKeys.guilds });
+  // The backend forgets the account's interrupted videos with its token.
+  void queryClient.invalidateQueries({ queryKey: queryKeys.interruptedVideos });
+}
+
 export function useConnectQuests() {
   const queryClient = useQueryClient();
 
@@ -76,6 +91,8 @@ export function useConnectQuests() {
     // instead of keeping it in the cache for the default five minutes.
     gcTime: 0,
     onSuccess: (response) => {
+      // The token may belong to another account than the previous one.
+      forgetAccountData(queryClient);
       queryClient.setQueryData<QuestsResponse>(queryKeys.quests, response);
       queryClient.setQueryData(queryKeys.questsConnection, true);
     },
@@ -139,10 +156,7 @@ export function useDisconnectQuests() {
   return useMutation({
     mutationFn: ipc.disconnectQuests,
     onSuccess: () => {
-      queryClient.removeQueries({ queryKey: queryKeys.quests });
-      queryClient.removeQueries({ queryKey: queryKeys.orbsBalance });
-      queryClient.removeQueries({ queryKey: queryKeys.orbsShop });
-      queryClient.removeQueries({ queryKey: queryKeys.profile });
+      forgetAccountData(queryClient);
       queryClient.setQueryData(queryKeys.questsConnection, false);
     },
   });

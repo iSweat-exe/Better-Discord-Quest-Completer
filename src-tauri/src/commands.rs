@@ -16,12 +16,13 @@ use tauri::{AppHandle, Emitter as _, State};
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_opener::OpenerExt as _;
 
-use crate::discord::{self, DetectionReport, DiscordStatus};
+use crate::diagnostics::{self, Check};
+use crate::discord::{self, DetectionReport, DiscordStatus, PrimaryGame};
 use crate::disk::{self, CleanReport, StorageInfo};
 use crate::error::{AppError, AppResult};
 use crate::games::catalog::Catalog;
 use crate::games::library::LibraryEntry;
-use crate::games::model::CURRENT_PLATFORM;
+use crate::games::model::{CURRENT_PLATFORM, is_valid_game_id};
 use crate::games::transfer;
 use crate::launcher::{self, find_game};
 use crate::lifecycle;
@@ -31,10 +32,13 @@ use crate::process::runner;
 use crate::process::sessions::SessionInfo;
 use crate::quest_watch;
 use crate::quests::QuestsResponse;
+use crate::quests::account::{AccountDetails, Guild, ProfileEdit};
 use crate::quests::model::Profile;
 use crate::quests::risk::{ActivityEntry, RiskReport};
 use crate::quests::shop::ShopResponse;
-use crate::settings::{Settings, SettingsPatch};
+use crate::queue::{self, QueueItem, QueueStatus};
+use crate::resume::{self, InterruptedRun};
+use crate::settings::{MAX_QUEST_MINUTES, MIN_QUEST_MINUTES, Settings, SettingsPatch};
 use crate::state::{
     EVENT_CATALOG_UPDATED, EVENT_QUEST_VIDEO_ENDED, EVENT_QUEST_VIDEO_PROGRESS, EVENT_QUESTS_DISCONNECTED,
     EVENT_QUESTS_UPDATED, EVENT_UPDATE_PROGRESS, Shared,
@@ -98,7 +102,9 @@ fn refresh_catalog_in_background(app: &AppHandle, state: &Shared) {
     let shared = Arc::clone(state);
     tauri::async_runtime::spawn(async move {
         let loaded = shared.catalog.load(true).await;
-        shared.catalog.end_background_refresh();
+        // A failed download still answers with the older data, and the reason.
+        let failed = loaded.as_ref().map_or(true, |catalog| catalog.refresh_error.is_some());
+        shared.catalog.end_background_refresh(failed);
 
         match loaded {
             Ok(catalog) => {
@@ -187,15 +193,29 @@ pub fn get_settings(state: State<'_, Shared>) -> Settings {
 #[tauri::command(async)]
 pub fn update_settings(app: AppHandle, state: State<'_, Shared>, patch: SettingsPatch) -> AppResult<Settings> {
     // The system entry is changed first: if Windows refuses, nothing is saved.
-    if let Some(enabled) = patch.launch_at_startup
-        && enabled != state.settings.get().launch_at_startup
-    {
+    let set_startup = |enabled: bool| {
         let autolaunch = app.autolaunch();
         let result = if enabled { autolaunch.enable() } else { autolaunch.disable() };
-        result.map_err(|error| AppError::Internal(format!("could not change the startup entry: {error}")))?;
+        result.map_err(|error| AppError::Internal(format!("could not change the startup entry: {error}")))
+    };
+    let startup_changed = patch.launch_at_startup.filter(|enabled| *enabled != state.settings.get().launch_at_startup);
+    if let Some(enabled) = startup_changed {
+        set_startup(enabled)?;
     }
 
-    let settings = state.settings.update(patch)?;
+    let settings = match state.settings.update(patch) {
+        Ok(settings) => settings,
+        Err(error) => {
+            // The setting could not be saved: put the system entry back as it was,
+            // so Windows and the app keep agreeing.
+            if let Some(enabled) = startup_changed
+                && let Err(revert) = set_startup(!enabled)
+            {
+                state.log.warn(format!("Could not restore the startup entry: {revert}"));
+            }
+            return Err(error);
+        }
+    };
     lifecycle::refresh_tray(&app);
     Ok(settings)
 }
@@ -226,12 +246,80 @@ pub fn stop_session(app: AppHandle, state: State<'_, Shared>, session_id: String
     let session = state.sessions.stop(&session_id)?;
     state.log.info(format!("{} stopped.", session.game_name));
     state.finish_sessions(&app, std::slice::from_ref(&session));
+    // The queue's game stopped by hand: the queue moves on to its next quest.
+    queue::sessions_ended(&app, std::slice::from_ref(&session));
     state.broadcast_sessions(&app);
     Ok(())
 }
 
+// ------------------------------------------------------------------ queue
+
+#[tauri::command]
+pub fn get_queue(state: State<'_, Shared>) -> QueueStatus {
+    state.queue.status()
+}
+
+/// Adds quests to the queue (the UI resolves their games, as it shows them).
+/// The first one starts at once when nothing is playing.
+#[tauri::command(async)]
+pub fn enqueue_quests(app: AppHandle, state: State<'_, Shared>, items: Vec<QueueItem>) -> AppResult<QueueStatus> {
+    let mut valid = Vec::with_capacity(items.len());
+    for mut item in items {
+        if item.quest_id.is_empty() || !item.quest_id.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(AppError::Internal(format!("invalid quest id: {}", item.quest_id)));
+        }
+        if !is_valid_game_id(&item.game_id) {
+            return Err(AppError::InvalidGameId(item.game_id));
+        }
+        item.minutes = item.minutes.clamp(MIN_QUEST_MINUTES, MAX_QUEST_MINUTES);
+        valid.push(item);
+    }
+    queue::enqueue(&app, valid);
+    Ok(state.queue.status())
+}
+
+/// Gives up on one quest the queue plays (its game stops); a waiting quest takes its slot.
+#[tauri::command(async)]
+pub fn skip_queue_item(app: AppHandle, quest_id: String) {
+    queue::skip(&app, &quest_id);
+}
+
+/// Empties the queue and stops the game it was playing.
+#[tauri::command(async)]
+pub fn stop_queue(app: AppHandle) {
+    queue::clear(&app);
+}
+
+#[tauri::command(async)]
+pub fn remove_from_queue(app: AppHandle, state: State<'_, Shared>, quest_id: String) {
+    if state.queue.lock().remove(&quest_id) {
+        queue::changed(&app);
+    }
+}
+
+// ----------------------------------------------------------------- resume
+
+/// What a closed app left running, if the user has not dealt with it yet.
+#[tauri::command]
+pub fn get_interrupted_run(state: State<'_, Shared>) -> Option<InterruptedRun> {
+    state.resume.interrupted()
+}
+
+/// Restarts what a closed app left running. Returns how many games and quests were picked up.
+#[tauri::command]
+pub async fn resume_interrupted_run(app: AppHandle) -> AppResult<usize> {
+    Ok(resume::resume(&app).await)
+}
+
+#[tauri::command(async)]
+pub fn dismiss_interrupted_run(app: AppHandle) {
+    resume::dismiss(&app);
+}
+
 #[tauri::command(async)]
 pub fn stop_all_sessions(app: AppHandle, state: State<'_, Shared>) {
+    // Stopping everything stops the queue too, or it would start its next game at once.
+    queue::forget(&app);
     let stopped = state.sessions.stop_all();
     if !stopped.is_empty() {
         state.log.info(format!("{} session(s) stopped.", stopped.len()));
@@ -413,6 +501,33 @@ pub async fn get_orbs_shop(state: State<'_, Shared>) -> AppResult<ShopResponse> 
     state.quests.orbs_shop().await
 }
 
+/// The account in detail (never its email, phone or billing).
+#[tauri::command]
+pub async fn get_account(state: State<'_, Shared>) -> AppResult<AccountDetails> {
+    state.quests.account().await
+}
+
+/// The servers the account is in.
+#[tauri::command]
+pub async fn get_guilds(state: State<'_, Shared>) -> AppResult<Vec<Guild>> {
+    let result = state.quests.guilds().await;
+    logged(&state, "Could not load the servers", result)
+}
+
+/// Writes on the account: the UI asks the user to confirm before calling it.
+#[tauri::command]
+pub async fn edit_profile(state: State<'_, Shared>, edit: ProfileEdit) -> AppResult<AccountDetails> {
+    let result = state.quests.edit_profile(edit).await;
+    logged(&state, "Could not change the profile", result)
+}
+
+/// Writes on the account: the UI asks the user to confirm before calling it.
+#[tauri::command]
+pub async fn leave_guild(state: State<'_, Shared>, guild_id: String, name: String) -> AppResult<()> {
+    let result = state.quests.leave_guild(&guild_id, &name).await;
+    logged(&state, "Could not leave the server", result)
+}
+
 #[tauri::command]
 pub async fn disconnect_quests(state: State<'_, Shared>) -> AppResult<()> {
     state.quests.disconnect().await
@@ -433,21 +548,28 @@ pub fn get_pending_update(state: State<'_, Shared>) -> Option<UpdateInfo> {
     state.updates.pending_info()
 }
 
-/// Installs the pending update and restarts the app. The fake games are stopped
-/// first: the installer replaces the program they were started by.
+/// Installs the pending update and restarts the app. The fake games keep running
+/// during the download, and are stopped only once it succeeded, right before the
+/// installer replaces the program they were started by.
 #[tauri::command]
 pub async fn install_update(app: AppHandle, state: State<'_, Shared>) -> AppResult<()> {
-    let stopped = state.sessions.stop_all();
-    state.finish_sessions(&app, &stopped);
-    state.broadcast_sessions(&app);
-
     state.log.info("Downloading the update…");
     let progress_app = app.clone();
     let installed = state
         .updates
-        .install(move |progress| {
-            let _ = progress_app.emit(EVENT_UPDATE_PROGRESS, progress);
-        })
+        .install(
+            move |progress| {
+                let _ = progress_app.emit(EVENT_UPDATE_PROGRESS, progress);
+            },
+            || {
+                // The games stopped for the installer are offered again after the restart.
+                state.save_resume_point();
+                state.resume.freeze();
+                let stopped = state.sessions.stop_all();
+                state.finish_sessions(&app, &stopped);
+                state.broadcast_sessions(&app);
+            },
+        )
         .await;
     logged(&state, "Could not install the update", installed)?;
 
@@ -464,6 +586,19 @@ pub async fn get_discord_status() -> AppResult<DiscordStatus> {
 }
 
 /// Asks Discord's own log whether it noticed the game of `session_id`.
+/// The game Discord puts forward right now, from its log.
+#[tauri::command]
+pub async fn get_primary_game(state: State<'_, Shared>) -> AppResult<Option<PrimaryGame>> {
+    let games_dir = state.paths.games_dir();
+    spawn_blocking(move || discord::primary_game(&games_dir)).await
+}
+
+/// Checks everything game detection depends on (see `diagnostics`).
+#[tauri::command]
+pub async fn run_diagnostics(app: AppHandle, state: State<'_, Shared>) -> AppResult<Vec<Check>> {
+    Ok(diagnostics::run(&app, &state).await)
+}
+
 #[tauri::command]
 pub async fn check_detection(state: State<'_, Shared>, session_id: String) -> AppResult<DetectionReport> {
     let session = state

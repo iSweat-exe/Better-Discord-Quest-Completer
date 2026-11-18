@@ -3,6 +3,8 @@ import { useEffect } from "react";
 import { toast } from "sonner";
 
 import { useLogStore } from "@/features/logs/log-store";
+import { forgetAccountData } from "@/features/quests/queries";
+import { useQueueStore } from "@/features/queue/queue-store";
 import { useVideoStore } from "@/features/quests/video-store";
 import { useSessionStore } from "@/features/sessions/session-store";
 import { useUpdateStore } from "@/features/update/update-store";
@@ -11,7 +13,7 @@ import { formatNumber } from "@/lib/format";
 import { translate, useLocaleStore } from "@/lib/i18n";
 import { ipc } from "@/lib/ipc";
 import { queryKeys } from "@/lib/query";
-import type { QuestsResponse } from "@/types/domain";
+import type { QuestsResponse, Settings, SlowCause } from "@/types/domain";
 
 import { useUiStore } from "./ui-store";
 
@@ -29,14 +31,29 @@ function currentLocale() {
   return useLocaleStore.getState().locale;
 }
 
+/** Ignores a failed snapshot: the live events that follow carry the same data. */
+function ignore(): undefined {
+  return undefined;
+}
+
 /** Running games: the snapshot, then every change, and the toast when a timer completes. */
 function useSessionEvents() {
   useEffect(() => {
     const { setSessions } = useSessionStore.getState();
-    void ipc.listSessions().then(setSessions);
+    // An event can arrive before the snapshot does: the snapshot is then older, and dropped.
+    let live = false;
+    ipc
+      .listSessions()
+      .then((sessions) => {
+        if (!live) setSessions(sessions);
+      })
+      .catch(ignore);
 
     return unsubscribeAll([
-      subscribe(EVENTS.sessionsChanged, setSessions),
+      subscribe(EVENTS.sessionsChanged, (sessions) => {
+        live = true;
+        setSessions(sessions);
+      }),
       subscribe(EVENTS.sessionCompleted, (session) => {
         toast.success(
           translate(currentLocale(), "quest.completedToast", {
@@ -52,11 +69,85 @@ function useSessionEvents() {
   }, []);
 }
 
+/** Whether the user wants to hear about detection (the setting, on until known otherwise). */
+function detectionAlertsWanted(settings: Settings | undefined): boolean {
+  return settings?.notifyOnDetection ?? true;
+}
+
+/** Why Discord may still not see a game, in words. */
+function slowCauseText(cause: SlowCause, game: string): string {
+  const locale = currentLocale();
+  switch (cause.kind) {
+    case "unsupportedClient":
+      return translate(locale, "detect.slow.unsupportedClient", { client: cause.detail });
+    case "otherPrimaryGame":
+      return translate(locale, "detect.slow.otherPrimaryGame", { other: cause.detail, game });
+    default:
+      return translate(locale, `detect.slow.${cause.kind}`, { game });
+  }
+}
+
+/** Discord noticing a game (its timer starts), or being slow to: toasts, if wanted. */
+function useDetectionEvents() {
+  const queryClient = useQueryClient();
+
+  useEffect(
+    () =>
+      unsubscribeAll([
+        subscribe(EVENTS.sessionDetected, (session) => {
+          if (!detectionAlertsWanted(queryClient.getQueryData<Settings>(queryKeys.settings))) return;
+          toast.success(translate(currentLocale(), "detect.toast.detected", { game: session.gameName }));
+        }),
+        subscribe(EVENTS.detectionSlow, ({ gameName, cause }) => {
+          if (!detectionAlertsWanted(queryClient.getQueryData<Settings>(queryKeys.settings))) return;
+          toast.warning(translate(currentLocale(), "detect.toast.slow", { game: gameName }), {
+            description: slowCauseText(cause, gameName),
+            duration: 15_000,
+          });
+        }),
+      ]),
+    [queryClient],
+  );
+}
+
+/** The quest queue: the snapshot, then every change. */
+function useQueueEvents() {
+  useEffect(() => {
+    const { setStatus } = useQueueStore.getState();
+    let live = false;
+    ipc
+      .getQueue()
+      .then((status) => {
+        if (!live) setStatus(status);
+      })
+      .catch(ignore);
+
+    return subscribe(EVENTS.queueChanged, (status) => {
+      live = true;
+      setStatus(status);
+    });
+  }, []);
+}
+
+/** What a closed app left running: resumed or dismissed (possibly by itself, with the setting). */
+function useResumeEvents() {
+  const queryClient = useQueryClient();
+
+  useEffect(
+    () =>
+      subscribe(EVENTS.resumeChanged, () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.interruptedRun });
+      }),
+    [queryClient],
+  );
+}
+
 /** The activity log: what was already written, then each new line. */
 function useLogEvents() {
   useEffect(() => {
     const logs = useLogStore.getState();
-    void ipc.getLogs().then(logs.replace);
+    // Merged, not replaced: lines that arrived live before the snapshot are kept.
+    ipc.getLogs().then(logs.merge).catch(ignore);
 
     return subscribe(EVENTS.appLog, logs.append);
   }, []);
@@ -66,11 +157,21 @@ function useLogEvents() {
 function useUpdateEvents() {
   useEffect(() => {
     const update = useUpdateStore.getState();
-    // The check may have found something before this window was listening.
-    void ipc.getPendingUpdate().then(update.setInfo);
+    // The check may have found something before this window was listening; an
+    // announcement that arrives first is newer than the snapshot.
+    let announced = false;
+    ipc
+      .getPendingUpdate()
+      .then((info) => {
+        if (!announced) update.setInfo(info);
+      })
+      .catch(ignore);
 
     return unsubscribeAll([
-      subscribe(EVENTS.updateAvailable, update.setInfo),
+      subscribe(EVENTS.updateAvailable, (info) => {
+        announced = true;
+        update.setInfo(info);
+      }),
       subscribe(EVENTS.updateProgress, update.setProgress),
     ]);
   }, []);
@@ -108,9 +209,7 @@ function useQuestEvents() {
           queryClient.setQueryData(queryKeys.quests, response);
         }),
         subscribe(EVENTS.questsDisconnected, () => {
-          queryClient.removeQueries({ queryKey: queryKeys.quests });
-          queryClient.removeQueries({ queryKey: queryKeys.orbsBalance });
-          queryClient.removeQueries({ queryKey: queryKeys.profile });
+          forgetAccountData(queryClient);
           queryClient.setQueryData(queryKeys.questsConnection, false);
         }),
         subscribe(EVENTS.statsChanged, () => {
@@ -136,7 +235,7 @@ function useVideoEvents() {
 
   useEffect(() => {
     // A viewing started before a reload goes on in the backend.
-    void ipc.getActiveVideos().then(useVideoStore.getState().replaceAll);
+    ipc.getActiveVideos().then(useVideoStore.getState().replaceAll).catch(ignore);
 
     return unsubscribeAll([
       subscribe(EVENTS.questVideoProgress, useVideoStore.getState().set),
@@ -155,6 +254,9 @@ function useVideoEvents() {
 /** Wires the backend's initial data and live events to the stores and the query cache. */
 export function useBackendEvents() {
   useSessionEvents();
+  useDetectionEvents();
+  useQueueEvents();
+  useResumeEvents();
   useLogEvents();
   useUpdateEvents();
   useGamesEvents();

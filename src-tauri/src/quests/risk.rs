@@ -31,12 +31,17 @@ pub enum WriteKind {
     Enroll,
     Claim,
     Video,
+    /// The display name, bio or pronouns of the account were changed.
+    Profile,
+    /// The account left a server.
+    LeaveGuild,
 }
 
 impl WriteKind {
     fn weight(self) -> u32 {
         match self {
-            Self::Enroll | Self::Claim => 1,
+            Self::Enroll | Self::Claim | Self::Profile => 1,
+            Self::LeaveGuild => 2,
             Self::Video => 3,
         }
     }

@@ -111,12 +111,11 @@ fn build_ico(png: &[u8]) -> AppResult<Vec<u8>> {
     Ok(ico)
 }
 
-/// Written beside its final name first, so a half-written file is never read.
+/// Written beside its final name first, so a half-written file is never read
+/// (and two launches of the same game never write through the same temporary file).
 fn save(dir: &Path, target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
-    let partial = target.with_extension("part");
-    std::fs::write(&partial, bytes)?;
-    std::fs::rename(&partial, target)
+    crate::storage::write_atomic(target, bytes)
 }
 
 #[cfg(test)]
@@ -199,6 +198,6 @@ mod tests {
         save(&dir.path().join("icons"), &target, &[0, 0, 1, 0]).unwrap();
 
         assert!(target.is_file());
-        assert!(!target.with_extension("part").exists());
+        assert_eq!(std::fs::read_dir(dir.path().join("icons")).unwrap().count(), 1, "no partial file is left behind");
     }
 }

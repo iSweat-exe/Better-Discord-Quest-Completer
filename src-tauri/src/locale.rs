@@ -1,6 +1,7 @@
 //! Strings shown by the native side (tray menu, notifications, fake game
 //! windows). Everything else is translated by the frontend.
 
+use crate::discord::SlowCause;
 use crate::settings::Language;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +58,122 @@ impl Lang {
             (Self::Fr, count) => format!("Discord Quest Completer — {count} jeux en cours"),
             (Self::En, 1) => "Discord Quest Completer — 1 game running".to_owned(),
             (Self::En, count) => format!("Discord Quest Completer — {count} games running"),
+        }
+    }
+
+    /// A running game in the tray menu: clicking it stops it.
+    pub fn tray_stop_game(self, game: &str, timer: &str) -> String {
+        match self {
+            Self::Fr => format!("Arrêter {game} ({timer})"),
+            Self::En => format!("Stop {game} ({timer})"),
+        }
+    }
+
+    pub fn tray_waiting(self) -> &'static str {
+        match self {
+            Self::Fr => "en attente de Discord",
+            Self::En => "waiting for Discord",
+        }
+    }
+
+    pub fn tray_timer_done(self) -> &'static str {
+        match self {
+            Self::Fr => "minuteur terminé",
+            Self::En => "timer complete",
+        }
+    }
+
+    pub fn tray_remaining(self, minutes: i64, ends_at: &str) -> String {
+        match self {
+            Self::Fr => format!("encore {minutes} min, fin vers {ends_at}"),
+            Self::En => format!("{minutes} min left, ends around {ends_at}"),
+        }
+    }
+
+    pub fn tray_queue(self, playing: usize, waiting: usize) -> String {
+        match (self, waiting) {
+            (Self::Fr, 0) => format!("File de quêtes : {playing} en cours"),
+            (Self::En, 0) => format!("Quest queue: {playing} playing"),
+            (Self::Fr, _) => format!("File de quêtes : {playing} en cours, {waiting} en attente"),
+            (Self::En, _) => format!("Quest queue: {playing} playing, {waiting} waiting"),
+        }
+    }
+
+    pub fn tray_queue_stop(self) -> &'static str {
+        match self {
+            Self::Fr => "Arrêter la file",
+            Self::En => "Stop the queue",
+        }
+    }
+
+    pub fn tray_recent(self) -> &'static str {
+        match self {
+            Self::Fr => "Relancer un jeu récent",
+            Self::En => "Relaunch a recent game",
+        }
+    }
+
+    pub fn detected_title(self) -> &'static str {
+        match self {
+            Self::Fr => "Discord a détecté le jeu",
+            Self::En => "Discord noticed the game",
+        }
+    }
+
+    pub fn detected_body(self, game: &str) -> String {
+        match self {
+            Self::Fr => format!("{game} : le minuteur de quête démarre."),
+            Self::En => format!("{game}: the quest timer starts."),
+        }
+    }
+
+    pub fn slow_title(self) -> &'static str {
+        match self {
+            Self::Fr => "Discord ne voit pas encore le jeu",
+            Self::En => "Discord does not see the game yet",
+        }
+    }
+
+    pub fn slow_body(self, game: &str, cause: &SlowCause) -> String {
+        match (self, cause) {
+            (Self::Fr, SlowCause::DiscordNotRunning) => format!("{game} tourne, mais aucune application Discord n'est ouverte."),
+            (Self::En, SlowCause::DiscordNotRunning) => format!("{game} is running, but no Discord desktop app is open."),
+            (Self::Fr, SlowCause::UnsupportedClient(client)) => {
+                format!("{client} ne détecte pas les jeux : ouvrez l'application Discord officielle.")
+            }
+            (Self::En, SlowCause::UnsupportedClient(client)) => {
+                format!("{client} does not detect games: open the official Discord app.")
+            }
+            (Self::Fr, SlowCause::LogUnavailable) => {
+                format!("Le journal de Discord est illisible : vérifiez dans Discord que {game} apparaît.")
+            }
+            (Self::En, SlowCause::LogUnavailable) => format!("Discord's log cannot be read: check in Discord that {game} shows up."),
+            (Self::Fr, SlowCause::OtherPrimaryGame(other)) => {
+                format!("Discord met {other} en avant : il ne confirme {game} qu'à son battement de 5 minutes.")
+            }
+            (Self::En, SlowCause::OtherPrimaryGame(other)) => {
+                format!("Discord puts {other} forward: it confirms {game} only at its 5-minute heartbeat.")
+            }
+            (Self::Fr, SlowCause::Unknown) => {
+                "Vérifiez que le partage de l'activité est activé (Paramètres Discord › Confidentialité des activités).".to_owned()
+            }
+            (Self::En, SlowCause::Unknown) => {
+                "Check that activity sharing is on (Discord settings › Activity Privacy).".to_owned()
+            }
+        }
+    }
+
+    pub fn queue_done_title(self) -> &'static str {
+        match self {
+            Self::Fr => "File de quêtes terminée",
+            Self::En => "Quest queue finished",
+        }
+    }
+
+    pub fn queue_done_body(self, completed: usize, total: usize) -> String {
+        match self {
+            Self::Fr => format!("{completed} quête(s) sur {total} validée(s) par Discord."),
+            Self::En => format!("{completed} of {total} quest(s) confirmed by Discord."),
         }
     }
 

@@ -81,6 +81,8 @@ struct ActiveSession {
     info: SessionInfo,
     child: Child,
     completion_reported: bool,
+    /// The user was already told that Discord is slow to notice this game.
+    slow_reported: bool,
 }
 
 /// What changed since the previous call to [`SessionManager::reap`].
@@ -141,7 +143,7 @@ impl SessionManager {
             detected_at: None,
         };
 
-        sessions.insert(spec.id, ActiveSession { info: info.clone(), child, completion_reported: false });
+        sessions.insert(spec.id, ActiveSession { info: info.clone(), child, completion_reported: false, slow_reported: false });
         Ok(info)
     }
 
@@ -196,6 +198,28 @@ impl SessionManager {
             }
             _ => false,
         }
+    }
+
+    /// Sessions still waiting for Discord `after_ms` after their launch, each
+    /// returned once: the caller warns the user about them.
+    pub fn take_slow_detections(&self, after_ms: i64, now: i64) -> Vec<SessionInfo> {
+        self.lock()
+            .values_mut()
+            .filter(|session| {
+                !session.slow_reported
+                    && session.info.detection == DetectionPhase::Waiting
+                    && now.saturating_sub(session.info.started_at) >= after_ms
+            })
+            .map(|session| {
+                session.slow_reported = true;
+                session.info.clone()
+            })
+            .collect()
+    }
+
+    /// Whether fake games are tied to the app's Job Object (killed with it if it crashes).
+    pub fn has_job(&self) -> bool {
+        self.job.is_some()
     }
 
     pub fn is_game_running(&self, game_id: &str) -> bool {
@@ -289,6 +313,20 @@ mod tests {
         manager.stop("a").unwrap();
         assert_eq!(manager.count(), 0);
         assert!(!manager.is_game_running("1"));
+    }
+
+    #[test]
+    fn a_slow_detection_is_reported_once_per_session() {
+        let manager = manager();
+        let mut spec = long_running("a", Duration::from_mins(15));
+        spec.await_detection = true;
+        let info = manager.start(spec).unwrap();
+
+        assert!(manager.take_slow_detections(120_000, info.started_at + 60_000).is_empty(), "too early");
+        assert_eq!(manager.take_slow_detections(120_000, info.started_at + 120_000).len(), 1);
+        assert!(manager.take_slow_detections(120_000, info.started_at + 300_000).is_empty(), "already reported");
+
+        manager.stop_all();
     }
 
     #[test]

@@ -76,6 +76,13 @@ pub struct Settings {
     pub auto_stop_on_complete: bool,
     /// Start with Windows, minimized to the tray.
     pub launch_at_startup: bool,
+    /// Play a "play" quest by itself as soon as it is accepted (in Discord or in
+    /// the app): its game joins the quest queue. Needs the Discord token.
+    pub auto_play_accepted: bool,
+    /// Resume the games a closed app left running without asking first.
+    pub auto_resume: bool,
+    /// Tell when Discord notices a game, and when it is slow to.
+    pub notify_on_detection: bool,
 }
 
 impl Default for Settings {
@@ -92,6 +99,9 @@ impl Default for Settings {
             wait_for_detection: true,
             auto_stop_on_complete: false,
             launch_at_startup: false,
+            auto_play_accepted: false,
+            auto_resume: false,
+            notify_on_detection: true,
         }
     }
 }
@@ -111,6 +121,9 @@ pub struct SettingsPatch {
     pub wait_for_detection: Option<bool>,
     pub auto_stop_on_complete: Option<bool>,
     pub launch_at_startup: Option<bool>,
+    pub auto_play_accepted: Option<bool>,
+    pub auto_resume: Option<bool>,
+    pub notify_on_detection: Option<bool>,
 }
 
 impl Settings {
@@ -147,6 +160,15 @@ impl Settings {
         }
         if let Some(value) = patch.launch_at_startup {
             self.launch_at_startup = value;
+        }
+        if let Some(value) = patch.auto_play_accepted {
+            self.auto_play_accepted = value;
+        }
+        if let Some(value) = patch.auto_resume {
+            self.auto_resume = value;
+        }
+        if let Some(value) = patch.notify_on_detection {
+            self.notify_on_detection = value;
         }
         self.sanitize();
     }
@@ -254,6 +276,21 @@ mod tests {
         });
         assert!(settings.auto_stop_on_complete);
         assert_eq!(settings.runner_window, RunnerWindow::Hidden);
+    }
+
+    #[test]
+    fn automation_is_off_and_detection_alerts_on_by_default() {
+        let mut settings: Settings = serde_json::from_str("{}").unwrap();
+        assert!(!settings.auto_play_accepted && !settings.auto_resume);
+        assert!(settings.notify_on_detection);
+
+        settings.apply(SettingsPatch {
+            auto_play_accepted: Some(true),
+            auto_resume: Some(true),
+            notify_on_detection: Some(false),
+            ..SettingsPatch::default()
+        });
+        assert!(settings.auto_play_accepted && settings.auto_resume && !settings.notify_on_detection);
     }
 
     #[test]

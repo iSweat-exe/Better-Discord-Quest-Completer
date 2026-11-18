@@ -125,6 +125,9 @@ struct State {
     font_title: HFONT,
     font_body: HFONT,
     taskbar_created: u32,
+    /// Loaded once and kept for the whole run: every `LoadImageW` from a file
+    /// creates a new icon handle, so loading it on each tray update would leak them.
+    tray_icon: HICON,
 }
 
 impl State {
@@ -255,8 +258,7 @@ unsafe fn tray_data(hwnd: HWND, state: &State) -> NOTIFYICONDATAW {
     data.uID = TRAY_UID;
     data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     data.uCallbackMessage = WM_TRAY;
-    // SAFETY: thread d'interface.
-    data.hIcon = unsafe { load_app_icon(true) };
+    data.hIcon = state.tray_icon;
 
     // On garde la place du NUL final dans `szTip`.
     let capacity = data.szTip.len() - 1;
@@ -572,6 +574,7 @@ pub fn run(options: &Options) {
             font_title: null_mut(),
             font_body: null_mut(),
             taskbar_created: RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()),
+            tray_icon: small_icon,
         });
 
         let style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN;

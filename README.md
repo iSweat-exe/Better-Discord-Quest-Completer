@@ -19,20 +19,45 @@ Réécriture complète du projet [markterence/discord-quest-completer](https://g
 
 ## Fonctionnalités
 
+- **Prise en main guidée** : un écran d'accueil qui *propose* une visite de 4 étapes (projecteur sur les éléments clés,
+  passable, au clavier, relançable depuis les Réglages) qui se termine sur la première vraie action ; une liste
+  « Premiers pas » cochée automatiquement jusqu'au moment où Discord affiche votre jeu ; des astuces contextuelles
+  affichées une seule fois, au moment où elles servent ; et un guide pas à pas pour trouver son token.
 - **Recherche instantanée** parmi plus de 10 000 jeux détectables (`Ctrl + K`), tolérante aux fautes de frappe,
   aux accents et aux symboles ™ ® ©.
 - **Lancement en un clic** : l'application crée un minuscule exécutable factice (≈ 220 Ko) au nom attendu par
   Discord et le démarre.
 - **Quêtes Discord dans l'application** (optionnel, nécessite le token du compte, voir
-  [Quêtes Discord](#quêtes-discord-optionnel)) : vos quêtes, et le jeu demandé à ajouter ou lancer en un clic, avec la
-  durée exacte de la quête.
+  [Quêtes Discord](#quêtes-discord-optionnel)) : vos quêtes et leur progression, le jeu demandé à ajouter ou lancer en
+  un clic avec la durée exacte de la quête, l'acceptation d'une quête, la réclamation de sa récompense et le visionnage
+  des quêtes vidéo, chacun sur un clic ; votre profil, votre solde d'Orbs et la boutique d'Orbs (en lecture).
+- **File « Tout faire »** : un bouton sur la page Quêtes lance les jeux de toutes vos quêtes « jouer » acceptées
+  **en même temps** (Discord compte le temps de chaque jeu détecté, jusqu'à 10 à la fois), chacun pour le temps que
+  Discord réclame encore : la file dure autant que sa quête la plus longue. Chaque jeu s'arrête dès que Discord valide
+  sa quête ; une quête que Discord ne confirme pas 30 min après sa durée est abandonnée. Aucune écriture sur le compte. Option **« Lancer les quêtes acceptées »** : une quête
+  acceptée dans Discord (ou dans l'application) rejoint la file toute seule.
+- **Reprise des jeux interrompus** : après une fermeture, un plantage, un redémarrage du PC ou une mise à jour,
+  l'application propose de relancer les jeux et la file qui tournaient, chacun avec le temps qu'il lui restait (ou les
+  relance seule, en option).
+- **Alertes de détection** : notification quand Discord détecte un jeu (le minuteur démarre), et, s'il ne le voit
+  toujours pas après 2 minutes, la cause probable (Discord fermé, client sans détection, autre jeu mis en avant,
+  confidentialité des activités).
+- **Jeu principal de Discord** : pastille « Discord affiche : … » en direct pendant que des jeux tournent, avec un
+  avertissement quand un autre jeu est mis en avant (vos faux jeux ne sont alors confirmés que toutes les 5 minutes).
+- **Page Diagnostic** : vérification en un clic du client Discord, de son journal, du faux jeu (pas mis en quarantaine
+  par l'antivirus), du dossier de données, de la liste des jeux, du token et du démarrage avec Windows, avec un
+  **rapport à copier** (sans votre nom d'utilisateur).
+- **Valeur des Orbs en dollars** : solde, récompenses, prix de la boutique et profil affichent leur équivalent, sur la
+  base de 1 400 Orbs = 3 jours de Nitro à 9,99 $ par mois (≈ 1 $ les 1 400 Orbs).
 - **Diagnostic de détection** : pastille « Discord détecté », et, pour chaque jeu lancé, un panneau qui vérifie
   Discord, le processus et la fenêtre, puis **confirme dans le journal local de Discord** que le jeu a bien été vu
   (voir [Détection par Discord](#détection-par-discord)).
 - **Minuteur de quête qui démarre à la détection** : il attend que Discord ait réellement vu le jeu, avec anneau de
   progression, **notification système** à la fin et **arrêt automatique** optionnel (durée réglable, 15 min par défaut).
 - **Plusieurs jeux en parallèle**, lancés d'un clic depuis la liste (ou tous à la fois), arrêtés individuellement ou
-  d'un seul coup (fenêtre ou icône de la barre d'état).
+  d'un seul coup.
+- **Barre d'état complète** : son menu liste chaque jeu en cours avec le temps restant et l'heure de fin (un clic
+  l'arrête), la file de quêtes (passer, arrêter), et les derniers jeux à relancer, sans ouvrir la fenêtre.
 - **Bibliothèque persistante** avec filtre, temps simulé et dernier lancement par jeu, **export / import**
   (presse-papiers) pour la retrouver ailleurs.
 - **Démarrage avec Windows**, réduit dans la barre d'état ; fenêtre des faux jeux visible, réduite ou masquée.
@@ -56,7 +81,7 @@ Réécriture complète du projet [markterence/discord-quest-completer](https://g
 | Erreurs | `unwrap()` partout (panique du backend) | `Result` typés, jamais de panique en fonctionnement normal |
 | Runner | C++ `no_std` + hacks de linkage | Rust pur (`windows-sys`), CRT statique, embarqué dans l'exécutable |
 | Retour visuel | Aucun : impossible de savoir si Discord voit le jeu | État de Discord, vérification de la détection |
-| Tests | Aucun | 118 tests Rust + 91 tests frontend |
+| Tests | Aucun | 226 tests Rust + 188 tests frontend, lancés par la CI à chaque push |
 
 ## Installation
 
@@ -64,8 +89,10 @@ Téléchargez l'installateur (`…_x64-setup.exe`) depuis les *Releases*. L'inst
 courant, sans droits administrateur. WebView2 est requis (préinstallé sous Windows 11).
 
 Aucune donnée n'est écrite à côté de l'exécutable : tout est dans `%LOCALAPPDATA%\dev.questcompleter.app\`
-(`settings.json`, `library.json`, cache de la liste et dossier `games\`). Pour désinstaller complètement,
-supprimez ce dossier après avoir désinstallé l'application.
+(`settings.json`, `library.json`, `stats.json`, `resume.json` pour la reprise des jeux interrompus, le cache de la
+liste des jeux, celui des quêtes, et le dossier `games\`). Le token éventuel est, lui, dans le gestionnaire
+d'identifiants de Windows. Pour désinstaller complètement, cliquez sur « Oublier mon token » si vous l'aviez
+enregistré, désinstallez l'application, puis supprimez ce dossier.
 
 ## Utilisation
 
@@ -74,16 +101,19 @@ supprimez ce dossier après avoir désinstallé l'application.
 3. Cliquez sur **Lancer**. Discord affiche « Joue à … » après quelques secondes.
 4. Laissez tourner jusqu'à la fin du minuteur, puis vérifiez la progression dans Discord.
 
-Raccourcis : `Ctrl + K` recherche · `⇧ Entrée` dans la recherche ajoute **et lance** le jeu · `Ctrl + 1…5` change
-de page.
+Raccourcis : `Ctrl + K` recherche · `⇧ Entrée` dans la recherche ajoute **et lance** le jeu · `Ctrl + 1…6` change
+de page (Jeux, Quêtes, Boutique, Présence, Journal, Réglages).
 
 > [!NOTE]
 > Le minuteur est indicatif : c'est Discord qui valide la quête.
 
 ## Quêtes Discord (optionnel)
 
-La page **Quêtes** affiche vos quêtes Discord et propose, pour celles qui demandent de jouer sur PC, d'**ajouter le jeu à
-la bibliothèque** ou de **le lancer** avec la durée demandée par la quête.
+La page **Quêtes** affiche vos quêtes Discord et leur progression. Pour celles qui demandent de jouer sur PC, elle
+propose d'**ajouter le jeu à la bibliothèque** ou de **le lancer** avec la durée demandée par la quête. Elle permet aussi,
+toujours sur un clic de votre part, d'**accepter** une quête, d'en **réclamer la récompense** et de **regarder** une quête
+vidéo (la progression est envoyée à Discord seconde par seconde, comme le ferait le lecteur). Les pages **Boutique** et
+**Profil** affichent la boutique d'Orbs, votre solde et votre profil, en lecture seule.
 
 **Pourquoi un token ?** Discord ne publie pas la liste des quêtes : `GET /api/v10/quests/@me` renvoie `401 Unauthorized`
 sans les identifiants du compte. Il n'existe pas d'autre moyen officiel de lire cette liste ; c'est pourquoi la fonction
@@ -91,17 +121,27 @@ est **désactivée par défaut** et n'apparaît qu'après une explication compl�
 
 Ce que fait l'application avec ce token :
 
-- **une seule requête, en lecture**, vers `discord.com` (HTTPS uniquement, redirections désactivées) ;
+- des **lectures** (`GET`) vers `discord.com` uniquement : vos quêtes, votre profil, votre solde d'Orbs et la boutique
+  d'Orbs, rien d'autre du compte ;
+- des **écritures** uniquement sur un clic de votre part, sur une quête à la fois : l'accepter, réclamer sa récompense,
+  ou envoyer la progression de sa vidéo. Rien n'est écrit en arrière-plan ; les quêtes « jouer » restent validées par
+  les faux jeux ;
+- un **rythme limité** : les quêtes sont relues une fois par minute pendant qu'un faux jeu tourne (pour afficher la
+  progression et arrêter le jeu quand Discord valide la quête) ; sinon toutes les 5 minutes si l'option « Lancer les
+  quêtes acceptées » est active, toutes les 20 minutes si vous avez demandé à être prévenu des nouvelles quêtes, et
+  jamais dans les autres cas ;
+- un **indicateur de risque** tient le compte des écritures des dernières 24 h (et de leur rapprochement) pour vous
+  montrer quand l'activité du compte devient inhabituelle ; il ne bloque rien ;
+- HTTPS uniquement, redirections désactivées : le token ne peut pas être renvoyé vers un autre site ;
 - le token est vérifié auprès de Discord **avant** d'être enregistré, puis conservé dans le **gestionnaire d'identifiants
   de Windows** : jamais dans un fichier de l'application, jamais dans le journal, jamais renvoyé à l'interface ;
 - il est effacé d'un clic (« Oublier mon token »), et automatiquement si Discord le refuse ;
-- l'application **ne cherche jamais** le token toute seule : c'est l'utilisateur qui le fournit, ou personne ;
-- elle **n'accepte, ne démarre ni ne valide jamais** une quête avec le compte : les quêtes restent validées par les faux
-  jeux, comme avant.
+- l'application **ne cherche jamais** le token toute seule : c'est l'utilisateur qui le fournit, ou personne.
 
 > [!WARNING]
 > Un token donne un accès complet au compte, et l'utiliser en dehors du client officiel est contraire aux conditions
-> d'utilisation de Discord, même pour une simple lecture : cela peut conduire à des sanctions. Ne le communiquez à
+> d'utilisation de Discord, même pour une simple lecture ; accepter des quêtes, réclamer des récompenses ou regarder des
+> vidéos par ce biais l'est encore plus visiblement : cela peut conduire à des sanctions. Ne le communiquez à
 > personne et méfiez-vous de toute application ou personne qui vous le demande. Si vous ne savez pas ce qu'est un
 > token, n'activez pas cette fonction. Le code concerné est dans `src-tauri/src/quests/`.
 
@@ -161,7 +201,8 @@ de build de `src-tauri` puis **embarqué** dans l'exécutable principal : il n'y
 .
 ├─ src/                     Frontend React
 │  ├─ components/ui/          Primitives (Button, Modal, Switch, Field…)
-│  ├─ features/               games · catalog · sessions · presence · logs · settings · shell
+│  ├─ features/               games · catalog · sessions · queue · resume · onboarding · quests · shop
+│  │                          profile · discord · diagnostic · presence · logs · settings · update · shell
 │  ├─ lib/                    ipc typé, événements, i18n, recherche, formats
 │  ├─ dev/mock-backend.ts     Faux backend pour le développement dans un navigateur
 │  └─ styles/                 Design tokens (oklch), thèmes, polices
@@ -169,8 +210,13 @@ de build de `src-tauri` puis **embarqué** dans l'exécutable principal : il n'y
 │  └─ src/
 │     ├─ games/               catalogue Discord, bibliothèque, export/import, validation des exécutables
 │     ├─ process/             sessions, Job Object, runner embarqué, liste des processus
-│     ├─ discord.rs           état du client Discord, vérification de la détection
-│     ├─ quests/              quêtes Discord (token, requête en lecture seule, analyse)
+│     ├─ discord.rs           état du client Discord, détection, jeu principal, causes d'un retard
+│     ├─ quests/              quêtes Discord (token, requêtes, analyse, boutique, indicateur de risque)
+│     ├─ quest_watch.rs       relecture périodique des quêtes, notifications
+│     ├─ queue.rs             file de quêtes « Tout faire », jeux en parallèle (machine à états + pilotage)
+│     ├─ resume.rs            reprise des jeux et de la file après une fermeture
+│     ├─ diagnostics.rs       vérifications de la page Diagnostic
+│     ├─ updates.rs           mises à jour signées depuis GitHub
 │     ├─ commands.rs          surface IPC exposée au frontend
 │     └─ lifecycle.rs         fenêtre, barre d'état, surveillance des sessions
 ├─ runner/                  Faux processus de jeu (crate séparée, ≈ 220 Ko)
@@ -211,8 +257,9 @@ npm run gamelist:update
   et seuls les dossiers nommés d'après un identifiant Discord peuvent être supprimés par le nettoyage.
 - La CSP est stricte (`default-src 'self'`) ; seules les icônes de `cdn.discordapp.com` sont autorisées.
 - Le frontend n'a accès qu'aux commandes listées dans `src-tauri/src/lib.rs` et à l'ouverture de quelques URL.
-- Aucune télémétrie. Les seules requêtes réseau sont le téléchargement de la liste de jeux (API publique de
-  Discord) et le chargement des icônes.
+- Aucune télémétrie. Les requêtes réseau sont : le téléchargement de la liste de jeux (API publique de Discord), le
+  chargement des icônes, la recherche de mises à jour (GitHub) et, seulement si vous avez enregistré un token, les
+  requêtes de la page Quêtes décrites plus haut.
 - La seule lecture hors de l'application est celle du journal de Discord (lecture seule, limitée aux jeux lancés par
   l'application, désactivable), décrite plus haut.
 - Le token Discord (fonction facultative des quêtes) est traité comme un secret : stockage dans le coffre de Windows,
@@ -237,10 +284,13 @@ Rien n'est installé sans accord, et un installateur dont la signature ne corres
 
 ### Publier une version
 
-1. Augmentez la version dans `package.json`, `src-tauri/Cargo.toml` et `src-tauri/tauri.conf.json`.
-2. Créez et poussez le tag : `git tag v2.1.0 && git push origin v2.1.0`.
-3. Le workflow **Release** compile, signe et crée une release en *brouillon* avec l'installateur, sa signature et
-   `latest.json`. **Publiez-la** : tant qu'elle est en brouillon, les applications ne la voient pas.
+1. `npm run version:set -- 2.2.0` écrit la version dans les sept fichiers qui la portent (`package.json` et son
+   lockfile, `tauri.conf.json`, les deux `Cargo.toml` et leurs `Cargo.lock`). `npm run version:check` vérifie qu'ils
+   sont d'accord ; la CI le vérifie aussi.
+2. Commitez, puis créez et poussez le tag : `git tag v2.2.0 && git push origin HEAD v2.2.0`.
+3. Le workflow **Release** relance toute la CI, vérifie que le tag correspond à la version, puis compile, signe et crée
+   une release en *brouillon* avec l'installateur, sa signature et `latest.json`. **Publiez-la** : tant qu'elle est en
+   brouillon, les applications ne la voient pas.
 
 ### Clés de signature
 

@@ -104,7 +104,9 @@ describe("ProfilePage", () => {
       expect(valueOf("Current balance")).toBe("1,250");
       expect(valueOf("Orbs earned")).toBe("1,200");
     });
-    expect(screen.getByText("+200 still to claim in Discord")).toBeInTheDocument();
+    expect(screen.getByText("≈ $0.86 in Nitro · +200 still to claim in Discord")).toBeInTheDocument();
+    // 1,400 Orbs buy 3 days of a $9.99 monthly Nitro.
+    expect(screen.getByText("≈ $0.89 in Nitro")).toBeInTheDocument();
   });
 
   it("counts the quests by outcome", async () => {

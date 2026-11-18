@@ -61,7 +61,8 @@ pub struct DownloadProgress {
 #[derive(Debug, Default)]
 pub struct ProgressThrottle {
     downloaded: u64,
-    last_percent: Option<u64>,
+    /// The last step reported: a percentage when the size is known, else a megabyte count.
+    last_step: Option<u64>,
 }
 
 impl ProgressThrottle {
@@ -70,16 +71,16 @@ impl ProgressThrottle {
         self.downloaded += chunk as u64;
         let progress = DownloadProgress { downloaded: self.downloaded, total };
 
-        let percent = total.filter(|total| *total > 0).map(|total| self.downloaded.saturating_mul(100) / total);
-        match (percent, self.last_percent) {
-            // The size is unknown: one report per megabyte is enough.
-            (None, _) => self.downloaded.is_multiple_of(1 << 20).then_some(progress),
-            (Some(now), Some(before)) if now == before => None,
-            (Some(now), _) => {
-                self.last_percent = Some(now);
-                Some(progress)
-            }
+        // The size is unknown: one report per megabyte crossed is enough, whatever the chunk sizes.
+        let step = match total.filter(|total| *total > 0) {
+            Some(total) => self.downloaded.saturating_mul(100) / total,
+            None => self.downloaded >> 20,
+        };
+        if self.last_step == Some(step) || (total.is_none() && step == 0) {
+            return None;
         }
+        self.last_step = Some(step);
+        Some(progress)
     }
 }
 
@@ -115,8 +116,14 @@ impl UpdateService {
 
     /// Downloads and installs the update found by the last check.
     ///
+    /// `before_install` runs once the download is complete and verified, right
+    /// before the installer starts: nothing is stopped for a download that fails.
     /// On Windows the installer takes over and the app quits before this returns.
-    pub async fn install(&self, mut on_progress: impl FnMut(DownloadProgress)) -> AppResult<()> {
+    pub async fn install(
+        &self,
+        mut on_progress: impl FnMut(DownloadProgress),
+        before_install: impl FnOnce(),
+    ) -> AppResult<()> {
         let update = self
             .lock()
             .as_ref()
@@ -124,8 +131,8 @@ impl UpdateService {
             .ok_or_else(|| AppError::Update("no update is waiting to be installed".into()))?;
 
         let mut throttle = ProgressThrottle::default();
-        update
-            .download_and_install(
+        let bytes = update
+            .download(
                 |chunk, total| {
                     if let Some(progress) = throttle.advance(chunk, total) {
                         on_progress(progress);
@@ -134,7 +141,10 @@ impl UpdateService {
                 || {},
             )
             .await
-            .map_err(update_error)
+            .map_err(update_error)?;
+
+        before_install();
+        update.install(bytes).map_err(update_error)
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Option<Pending>> {
@@ -195,8 +205,11 @@ mod tests {
 
     #[test]
     fn installing_without_a_check_is_refused() {
-        let error = tauri::async_runtime::block_on(UpdateService::default().install(|_| {})).unwrap_err();
+        let mut stopped = false;
+        let error =
+            tauri::async_runtime::block_on(UpdateService::default().install(|_| {}, || stopped = true)).unwrap_err();
         assert_eq!(error.kind(), "update");
+        assert!(!stopped, "nothing is stopped when there is nothing to install");
     }
 
     #[test]
@@ -231,5 +244,14 @@ mod tests {
         let mut throttle = ProgressThrottle::default();
         assert!(throttle.advance(MB / 2, None).is_none());
         assert!(throttle.advance(MB / 2, None).is_some());
+    }
+
+    #[test]
+    fn an_unknown_size_reports_even_when_chunks_miss_the_megabyte_boundaries() {
+        let mut throttle = ProgressThrottle::default();
+        // 16 KiB + 1 byte never lands exactly on a megabyte: 10 MiB still gives 10 reports.
+        let chunk = 16 * 1024 + 1;
+        let reported = (0..=(10 * MB / chunk)).filter(|_| throttle.advance(chunk, None).is_some()).count();
+        assert_eq!(reported, 10);
     }
 }

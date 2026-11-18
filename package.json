@@ -1,7 +1,7 @@
 {
   "name": "discord-quest-completer",
   "private": true,
-  "version": "2.1.1",
+  "version": "2.2.0",
   "type": "module",
   "description": "Simulez des jeux détectables par Discord pour valider vos Quêtes, sans installer les jeux.",
   "license": "MIT",
@@ -16,6 +16,8 @@
     "app": "tauri dev",
     "app:build": "tauri build",
     "gamelist:update": "node scripts/update-gamelist.mjs",
+    "version:set": "node scripts/version.mjs set",
+    "version:check": "node scripts/version.mjs check",
     "check:rust": "cargo clippy --workspace --all-targets -- -D warnings && cargo clippy --manifest-path runner/Cargo.toml -- -D warnings && cargo test --workspace",
     "check": "npm run typecheck && npm run lint && npm run test && npm run check:rust"
   },

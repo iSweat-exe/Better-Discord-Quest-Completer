@@ -6,14 +6,17 @@ import { EmptyState, Spinner } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/button";
 import { OrbIcon } from "@/components/ui/orb-icon";
 import { UserAvatar } from "@/components/ui/user-avatar";
+import { AccountSection } from "@/features/account/account-section";
+import { GuildsSection } from "@/features/account/guilds-section";
 import { useLibrary } from "@/features/games/queries";
 import { useOrbsBalance, useProfile, useQuests, useQuestsConnection } from "@/features/quests/queries";
 import { useUiStore } from "@/features/shell/ui-store";
 import { formatDuration, formatNumber, formatRelativeTime } from "@/lib/format";
 import { useT } from "@/lib/i18n/use-t";
+import { formatOrbsValue } from "@/lib/orbs";
 import { AUTHOR_HANDLE, AUTHOR_URL } from "@/lib/links";
 import { questStats } from "@/lib/stats";
-import { useNow } from "@/lib/use-now";
+import { useMinute } from "@/lib/use-now";
 
 import { ActivityHistory, WeeklyOrbs } from "./profile-sections";
 import { useAppStats } from "./queries";
@@ -77,7 +80,7 @@ function Identity() {
 
 function ProfileStats() {
   const { t, locale } = useT();
-  const now = useNow();
+  const now = useMinute();
 
   const quests = useQuests();
   const balance = useOrbsBalance();
@@ -94,12 +97,24 @@ function ProfileStats() {
     <>
       <Group title={t("profile.orbs")} delay={0}>
         <div className="grid grid-cols-3 gap-px overflow-hidden rounded-card bg-line shadow-card">
-          <Stat icon={orbIcon} label={t("profile.orbs.balance")} value={count(balance.data)} />
+          <Stat
+            icon={orbIcon}
+            label={t("profile.orbs.balance")}
+            value={count(balance.data)}
+            hint={balance.data === undefined ? undefined : t("orbs.worth", { value: formatOrbsValue(balance.data, locale) })}
+          />
           <Stat
             icon={orbIcon}
             label={t("profile.orbs.claimed")}
             value={count(stats?.orbsClaimed)}
-            hint={stats && stats.orbsToClaim > 0 ? t("profile.orbs.toClaim", { count: formatNumber(stats.orbsToClaim, locale) }) : undefined}
+            hint={
+              stats
+                ? [
+                    t("orbs.worth", { value: formatOrbsValue(stats.orbsClaimed, locale) }),
+                    ...(stats.orbsToClaim > 0 ? [t("profile.orbs.toClaim", { count: formatNumber(stats.orbsToClaim, locale) })] : []),
+                  ].join(" · ")
+                : undefined
+            }
           />
           <Stat
             icon={orbIcon}
@@ -171,6 +186,14 @@ function ProfileStats() {
 
       <Group title={t("profile.history.title")} delay={5}>
         <ActivityHistory now={now} />
+      </Group>
+
+      <Group title={t("account.title")} delay={6}>
+        <AccountSection />
+      </Group>
+
+      <Group title={t("account.guilds.title")} delay={7}>
+        <GuildsSection />
       </Group>
     </>
   );

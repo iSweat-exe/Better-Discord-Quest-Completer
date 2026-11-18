@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { useQueueStore } from "@/features/queue/queue-store";
 import { useSessionStore } from "@/features/sessions/session-store";
 import { useUiStore } from "@/features/shell/ui-store";
 import type * as IpcModule from "@/lib/ipc";
@@ -20,6 +21,7 @@ const api = vi.hoisted(() => ({
   enrollQuest: vi.fn(),
   getQuestRisk: vi.fn(),
   getInterruptedVideos: vi.fn(),
+  enqueueQuests: vi.fn(),
 }));
 vi.mock("@/lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof IpcModule>()),
@@ -109,6 +111,7 @@ describe("QuestsPage", () => {
     api.getInterruptedVideos.mockResolvedValue([]);
     useUiStore.setState({ searchOpen: false, searchSeed: "" });
     useSessionStore.setState({ sessions: [] });
+    useQueueStore.setState({ status: { playing: [], pending: [], done: [] } });
   });
 
   it("shows the gate instead of any quest when no token is saved", async () => {
@@ -159,7 +162,8 @@ describe("QuestsPage", () => {
     renderPage();
 
     await userEvent.click(await screen.findByRole("button", { name: /Search “Zzzzzz Qqqqqq”/ }));
-    expect(useUiStore.getState()).toMatchObject({ searchOpen: true, searchSeed: "Zzzzzz Qqqqqq" });
+    // The search lives on the games page: it must be shown, not opened on a hidden page.
+    expect(useUiStore.getState()).toMatchObject({ searchOpen: true, searchSeed: "Zzzzzz Qqqqqq", page: "games" });
   });
 
   it("does not offer a fake game for quests that are not played on a PC", async () => {
@@ -273,5 +277,45 @@ describe("QuestsPage", () => {
     expect(screen.getByText("Already done")).toBeInTheDocument();
     expect(screen.getByText("Too late")).toBeInTheDocument();
     expect(screen.queryByText("Still open")).not.toBeInTheDocument();
+  });
+
+  it("offers to play every accepted PC quest in a row, the one expiring first at the front", async () => {
+    respond([
+      quest({ id: "1", name: "Later", applicationId: "2", status: "enrolled", expiresAt: NOW + 5 * DAY }),
+      quest({ id: "2", name: "Sooner", applicationId: OVERWATCH.id, status: "enrolled", expiresAt: NOW + DAY, progressSeconds: 600 }),
+      quest({ id: "3", name: "Not accepted", applicationId: OVERWATCH.id }),
+      quest({ id: "4", name: "Console", applicationId: "3", status: "enrolled" }),
+    ]);
+    api.enqueueQuests.mockResolvedValue({ playing: [], pending: [], done: [] });
+    renderPage();
+
+    expect(await screen.findByText("2 quests can complete by themselves")).toBeInTheDocument();
+    // Both games run together: the longest quest (30 min) sets the pace, plus a minute to be noticed.
+    expect(screen.getByText(/About 31 min in all/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Do them all" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start the 2 quests" }));
+
+    await waitFor(() => {
+      expect(api.enqueueQuests).toHaveBeenCalledTimes(1);
+    });
+    const [items] = api.enqueueQuests.mock.calls[0] as [{ questId: string; minutes: number }[]];
+    // Only what Discord still wants is played: 30 min asked, 10 done.
+    expect(items.map(({ questId, minutes }) => ({ questId, minutes }))).toEqual([
+      { questId: "2", minutes: 20 },
+      { questId: "1", minutes: 30 },
+    ]);
+  });
+
+  it("shows the queue while it plays instead of the offer", async () => {
+    respond([quest({ id: "1", name: "Later", applicationId: "2", status: "enrolled" })]);
+    const item = { questId: "9", questName: "Running quest", gameId: "2", gameName: "Fortnite", executable: "fortnite.exe", minutes: 15 };
+    useQueueStore.setState({ status: { playing: [{ item, sessionId: null, startedAt: NOW }], pending: [], done: [] } });
+    renderPage();
+
+    expect(await screen.findByRole("region", { name: "Quest queue" })).toBeInTheDocument();
+    expect(screen.getByText("1 game playing at the same time")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Do them all" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add the other playable quest" })).toBeInTheDocument();
   });
 });

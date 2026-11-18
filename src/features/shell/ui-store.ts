@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type Page = "games" | "quests" | "shop" | "presence" | "logs" | "settings" | "profile";
+export type Page = "games" | "quests" | "shop" | "presence" | "logs" | "settings" | "profile" | "diagnostic";
 
 interface UiState {
   page: Page;
@@ -38,8 +38,10 @@ export const useUiStore = create<UiState>((set) => ({
   setSearchOpen: (searchOpen) => {
     set({ searchOpen, searchSeed: "" });
   },
+  // The search lives on the games page: open it there, as Ctrl+K does, or it
+  // would open on a hidden page when asked from another one (e.g. a quest card).
   openSearch: (searchSeed) => {
-    set({ searchOpen: true, searchSeed });
+    set({ searchOpen: true, searchSeed, page: "games" });
   },
   setClosePrompt: (closePrompt) => {
     set({ closePrompt });

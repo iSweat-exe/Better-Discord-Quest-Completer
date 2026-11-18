@@ -183,9 +183,10 @@ export function DetectionPanel({ session }: { session: SessionInfo }) {
   // The backend already watches Discord's log when the timer waits for detection.
   const automatic = session.detection !== "off";
   const detected = check.data?.state === "detected";
-  const { mutate: runCheck, isPending: checking } = check;
+  // A failed check is shown once (as a toast): retrying every few seconds would repeat it.
+  const { mutate: runCheck, isPending: checking, isError: failed } = check;
   useEffect(() => {
-    if (automatic || !watching || detected) return;
+    if (automatic || !watching || detected || failed) return;
 
     const timer = window.setInterval(() => {
       if (!checking) runCheck(session.id);
@@ -193,7 +194,7 @@ export function DetectionPanel({ session }: { session: SessionInfo }) {
     return () => {
       window.clearInterval(timer);
     };
-  }, [automatic, watching, detected, checking, runCheck, session.id]);
+  }, [automatic, watching, detected, failed, checking, runCheck, session.id]);
 
   const windowMode = settings?.runnerWindow ?? "normal";
 
@@ -202,7 +203,7 @@ export function DetectionPanel({ session }: { session: SessionInfo }) {
   }
 
   return (
-    <section aria-labelledby="detect-heading" className="rounded-inner bg-sunken p-4">
+    <section aria-labelledby="detect-heading" data-tour="detection" className="rounded-inner bg-sunken p-4">
       <h3 id="detect-heading" className="text-sm font-semibold tracking-tight">
         {t("detect.title")}
       </h3>

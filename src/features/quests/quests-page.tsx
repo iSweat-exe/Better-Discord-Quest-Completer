@@ -10,6 +10,7 @@ import { SwapIcon } from "@/components/ui/swap-icon";
 import { Segmented } from "@/components/ui/segmented";
 import { useCatalog } from "@/features/catalog/queries";
 import { useLibrary } from "@/features/games/queries";
+import { QueuePanel } from "@/features/queue/queue-panel";
 import { useSessionStore } from "@/features/sessions/session-store";
 import { cn } from "@/lib/cn";
 import { errorMessage } from "@/lib/errors";
@@ -215,6 +216,8 @@ function QuestBoard() {
               </div>
             ) : null}
 
+            {filter === "todo" ? <QueuePanel quests={openQuests} resolved={resolvedGames} now={now} /> : null}
+
             {filter === "todo" ? <ExpiryNotice quests={openQuests} now={now} /> : null}
             {filter === "todo" ? <InterruptedNotice quests={openQuests} now={now} /> : null}
 
@@ -271,12 +274,38 @@ function QuestBoard() {
 }
 
 export default function QuestsPage() {
+  const { t } = useT();
   const connection = useQuestsConnection();
 
   if (connection.isPending) {
     return (
       <div className="grid h-full place-items-center text-muted">
         <Spinner className="size-5" />
+      </div>
+    );
+  }
+  // The credential store could not be read: a token may well be saved, so asking
+  // for one again would be misleading.
+  if (connection.isError) {
+    return (
+      <div className="grid h-full place-items-center px-8">
+        <div className="rounded-card bg-surface shadow-card">
+          <EmptyState
+            icon={<TrophyIcon />}
+            title={t("quests.connectionFailed")}
+            action={
+              <Button
+                onClick={() => {
+                  void connection.refetch();
+                }}
+              >
+                {t("common.retry")}
+              </Button>
+            }
+          >
+            {errorMessage(connection.error, t)}
+          </EmptyState>
+        </div>
       </div>
     );
   }

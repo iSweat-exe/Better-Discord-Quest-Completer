@@ -21,6 +21,7 @@ import { errorMessage } from "@/lib/errors";
 import { formatNumber } from "@/lib/format";
 import type { MessageKey } from "@/lib/i18n";
 import { useT } from "@/lib/i18n/use-t";
+import { formatOrbsValue } from "@/lib/orbs";
 import { SHOP_URL } from "@/lib/links";
 import { queryKeys } from "@/lib/query";
 import { useFlash } from "@/lib/use-flash";
@@ -89,9 +90,14 @@ function ProductCard({ product, balance }: { product: ShopProduct; balance: numb
           {orbPrice === null ? (
             <span className="text-[13px] text-subtle">{t("shop.noOrbPrice")}</span>
           ) : (
-            <span className="flex items-center gap-1.5 text-sm font-semibold tabular-nums">
-              <OrbIcon className="size-4 shrink-0" />
-              {formatNumber(orbPrice, locale)}
+            <span className="flex flex-col">
+              <span className="flex items-center gap-1.5 text-sm font-semibold tabular-nums">
+                <OrbIcon className="size-4 shrink-0" />
+                {formatNumber(orbPrice, locale)}
+              </span>
+              <span className="text-xs tabular-nums text-subtle" title={t("orbs.valueHint")}>
+                {formatOrbsValue(orbPrice, locale)}
+              </span>
             </span>
           )}
           {affordable ? (
