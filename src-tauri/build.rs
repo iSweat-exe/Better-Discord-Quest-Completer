@@ -39,7 +39,7 @@ fn embed_runner() {
     let embedded = out_dir.join("dqc-runner.bin");
 
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
-        let built = build_runner(&runner_dir, &out_dir.join("runner-target"));
+        let built = build_runner(&runner_dir, &runner_target_dir(&manifest_dir));
         fs::copy(&built, &embedded).expect("failed to copy the runner binary");
     } else {
         // The runner only exists for Windows; other platforms get an empty
@@ -48,6 +48,13 @@ fn embed_runner() {
     }
 
     println!("cargo:rustc-env=DQC_RUNNER_PATH={}", embedded.display());
+}
+
+/// Where the runner is built. Deliberately short: under `OUT_DIR` the deepest file of the
+/// runner's own build (a build-script `.rlib`) reaches 262 characters on a CI checkout,
+/// which the MSVC linker cannot open (LNK1104, `MAX_PATH` is 260).
+fn runner_target_dir(manifest_dir: &Path) -> PathBuf {
+    manifest_dir.join("..").join("target").join("runner-build")
 }
 
 /// Builds the runner in its own target directory so it never contends with the
